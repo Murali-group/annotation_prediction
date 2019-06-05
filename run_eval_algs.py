@@ -10,6 +10,9 @@ import time
 import numpy as np
 from scipy import sparse
 # my packages
+# see if we can add the base folder
+sys.path.append(os.path.dirname(__file__))
+print(sys.path)
 import src.setup_sparse_networks as setup
 import src.algorithms.alg_utils as alg_utils
 import src.algorithms.runner as runner

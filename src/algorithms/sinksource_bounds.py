@@ -12,7 +12,7 @@ from collections import defaultdict
 #import networkx as nx
 import numpy as np
 from scipy.sparse import csr_matrix
-import alg_utils
+import src.algorithms.alg_utils
 import random
 from scipy.stats import kendalltau  #, spearmanr, weightedtau
 

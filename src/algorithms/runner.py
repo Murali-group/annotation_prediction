@@ -1,15 +1,14 @@
 
 import sys
 from collections import defaultdict
-sys.path.append("src/algorithms")
-import setup_sparse_networks as setup
-import alg_utils
-import fastsinksource_runner as fastsinksource
-import genemania_runner as genemania
-import apt_birg_rank_runner as birgrank
-import sinksource_bounds
-from aptrank_birgrank.birgrank import birgRank
-import aptrank_birgrank.run_birgrank as run_birgrank
+import src.setup_sparse_networks as setup
+import src.algorithms.alg_utils
+import src.algorithms.fastsinksource_runner as fastsinksource
+import src.algorithms.genemania_runner as genemania
+import src.algorithms.apt_birg_rank_runner as birgrank
+import src.algorithms.sinksource_bounds
+from src.algorithms.aptrank_birgrank.birgrank import birgRank
+import src.algorithms.aptrank_birgrank.run_birgrank as run_birgrank
 import numpy as np
 from scipy import sparse
 

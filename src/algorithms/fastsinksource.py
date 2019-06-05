@@ -1,7 +1,7 @@
 # Python implementation of SinkSource
 
 import time
-import alg_utils
+import src.algorithms.alg_utils
 import numpy as np
 from scipy.sparse import csr_matrix, eye
 from scipy.sparse import linalg
