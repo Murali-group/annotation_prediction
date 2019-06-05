@@ -8,12 +8,6 @@ import time
 from tqdm import tqdm
 sys.path.append("src")
 import utils.file_utils as utils
-# needed for evaluation metrics
-try:
-    from sklearn import metrics
-except ImportError:
-    print("WARNING: Unable to import sklearn")
-    pass
 
 
 ALGORITHMS = [
@@ -31,7 +25,6 @@ ALGORITHMS = [
 
 def str_(s):
     return str(s).replace('.','_')
-# TODO use kwargs instead of opts to be more general
 def get_filepath_helper(version='', alg='', exp_name='', 
                  exp_type='loso', postfix='', **kwargs):
     # setup the right weight_str for the filepath
@@ -358,106 +351,3 @@ def select_nodes(mat, indices):
     mask = np.zeros(mat.shape[0], dtype=bool)
     mask[indices] = True
     return mat[mask, :][:, mask]
-
-
-def compute_eval_measures(scores, positives, negatives=None, track_pos_neg=False):
-    """
-    Compute the precision and false-positive rate at each change in recall (true-positive rate)
-    *scores*: dictionary containing a score for each node
-    *negatives*: if negatives are given, then the FP will only be from the set of negatives given
-    *track_pos_neg*: if specified, track the score and rank of the positive and negative nodes,
-        and return a tuple of the node ids in order of their score, their score, their idx, and 1/-1 for pos/neg
-    """
-    #f1_score = metrics.f1score(positives, 
-    #num_unknowns = len(scores) - len(positives) 
-    positives = set(positives)
-    check_negatives = False
-    if negatives is not None:
-        check_negatives = True 
-        negatives = set(negatives)
-    else:
-        print("TODO. Treating all non-positives as negatives not yet implemented.")
-    # compute the precision and recall at each change in recall
-    # TODO I should call numpy argsort to ensure I'm using the full precision when comparing values
-    # use np.argsort
-    #nodes_sorted_by_scores = sorted(scores, key=scores.get, reverse=True)
-    nodes_sorted_by_scores = np.argsort(scores)[::-1]
-    #print("computing the rank of positive nodes")
-    # this is really slow...
-    #pos_ranks = sorted([nodes_sorted_by_scores.index(p)+1 for p in positives])
-    #print("%d positives, %d pos_ranks" % (len(positives), len(pos_ranks)))
-    #print(pos_ranks)
-    #print([scores[s] for s in nodes_sorted_by_scores[:pos_ranks[0]+1]])
-    precision = [1]
-    recall = [0]
-    fpr = []
-    pos_neg_stats = []  # tuple containing the node, score and idx
-    # TP is the # of correctly predicted positives so far
-    TP = 0
-    FP = 0
-    rec = 0
-    for i, n in enumerate(nodes_sorted_by_scores):
-        # TODO this could be slow if there are many positives
-        if n in positives:
-            TP += 1
-            # precisions is the # of true positives / # true positives + # of false positives (or the total # of predictions)
-            precision.append(TP / float(TP + FP))
-            # recall is the # of recovered positives TP / TP + FN (total # of positives)
-            rec = TP / float(len(positives))
-            recall.append(rec)
-            # fpr is the FP / FP + TN
-            fpr.append((rec, FP / float(len(negatives))))
-            if track_pos_neg:
-                pos_neg_stats.append((n, scores[n], i, 1)) 
-        elif check_negatives is False or n in negatives:
-            FP += 1
-            fpr.append((rec, FP / float(len(negatives))))
-        #else:
-        #    continue
-
-    # TODO how should I handle this case?
-    if len(precision) == 0:
-        precision.append(0)
-        recall.append(1)
-
-    #print(precision[0], recall[0], fpr[0])
-
-    if track_pos_neg:
-        return precision, recall, fpr, pos_neg_stats
-    else:
-        return precision, recall, fpr
-
-
-def compute_fmax(prec, rec):
-    f_measures = []
-    for i in range(len(prec)):
-        p, r = prec[i], rec[i]
-        if p+r == 0:
-            harmonic_mean = 0
-        else:
-            harmonic_mean = (2*p*r)/(p+r)
-        f_measures.append(harmonic_mean)
-    return max(f_measures)
-
-
-def compute_avgp(prec, rec):
-    # average precision score
-    # see http://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html#sklearn.metrics.average_precision_score
-    avgp = 0
-    prev_r = 0 
-    for p,r in zip(prec, rec):
-        recall_change = r - prev_r
-        avgp += (recall_change*p)
-        prev_r = r
-    #avgp = avgp / float(len(alg_prec_rec))
-    return avgp
-
-
-def compute_auprc(prec, rec):
-    auprc = metrics.auc(rec, prec)
-    return auprc
-
-
-def compute_auroc(tpr, fpr):
-    auroc = metrics.auc(fpr, tpr)
-    return auroc

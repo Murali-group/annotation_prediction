@@ -1,0 +1,119 @@
+# Input Settings: initialize base input folder names,
+# dataset collections, and algorithms to run over
+input_settings:
+
+    # Base input directory
+    #input_dir: "inputs"
+    input_dir: "/home/jeffl/git-workspace/igacat/FastSinkSource/inputs"
+
+    # path to file containing the selected strains 
+    #    from input_dir/
+    # shouldn't be needed for run_algs.py
+    #selected_strains: ""
+
+    # Denotes a list of experiments to run, each with the folling specified:
+    #   net_version: name to give this network. Will be used to organize output files 
+    #
+    #   net_file: path to network file, or .mat file containing multiple networks
+    #       or a list of file names. 
+    #       multi_net must be set to True if multiple networks are to be combined
+    #       the path should be from input_dir/net_version
+    #
+    #   string_net_files: a list of full STRING files, meaning all 16, tab-delimited columns
+    #       the path should be from input_dir/net_version
+    #
+    #   exp_name: the name to give the experiment to run
+    #
+    #   pos_neg_file: a file containing the positive and 
+    #       negative examples for each GO term
+    #
+    #   only_functions_file: a file containing the GO term IDs to run.
+    #       Not required.
+    #
+    #   
+    datasets:
+        - net_version: "2018_06-seq-sim-e0_1"
+          net_file: "2018_06-seq-sim-e0_1-net.txt"
+          #string_net_files: [""]
+          exp_name: "gogogo"
+          pos_neg_file: "pos-neg/expc/expc-bp.tsv"
+          only_functions_file: ""
+          # if multiple networks are present in the net file,
+          # set multi_net to True and use these settings
+          multi_net: False
+          net_settings:
+              # path to the network names file from input_dir/net_version
+              net_names_file: ""
+              # path to the node idx file
+              node_ids_file: ""
+              # method to combine the networks. either swsn, gmw, or unweighted
+              weight_method: 'swsn'
+              ## either core, nontransferred, all, or a comma-separated list of the string networks, or a combination of the above. Default: all
+              #string_nets: 'core'
+              ## cutoff of the STRING scores. Default: 150
+              #string_cutoff: 400
+
+
+
+# the outputs will follow this structure:
+# outputs/<net_version>/<exp_name>/<alg_name>/output_files
+output_settings:
+    output_dir: "outputs/"
+
+# Algorithms to run along with their settings
+# TODO allow multiple combinations of parameters
+algs: 
+    # local has no parameters
+    local:
+        should_run: [False]
+
+    fastsinksource:
+        should_run: [True]
+        alpha: [0.95]
+        eps: [0]
+        max_iters: [10]
+    
+    # sinksource-bounds
+    sinksource-bounds:
+        should_run: [False]
+        rank_all: [False]
+        rank_pos_neg: [False]
+        compare_ranks: [False]
+        alpha: [0.95]
+        max_iters: [10]
+
+    # genemania
+    genemania:
+        should_run: [False]
+        tol: [1e-05]
+
+    # birgrank
+    birgrank:
+        should_run: [False]
+        # path to the OBO file from the input_dir
+        obo_file: ["/data/inputs/goa/2017_09/2017-09-26-go.obo"]
+        alpha: [.5]
+        lambda: [.5]
+        mu: [.5]
+        theta: [.5]
+        eps: [1e-04]
+        max_iters: [1000]
+    
+    # aptrank
+    aptrank:
+        should_run: [True]
+        # path to the OBO file from the input_dir
+        obo_file: ["/data/inputs/goa/2017_09/2017-09-26-go.obo"]
+        lambda: [.5]
+        k: [8]
+        s: [5]
+        t: [0.5]
+        diff_type: ["twoway"]
+
+    #fastsinksourceplus:
+    #    alpha: 0.9
+    #    eps: 0.0001
+    #    max_iters: 1000
+    #    # this option isn't needed if alpha is < 1
+    #    sinksourceplus_lambda: 0
+

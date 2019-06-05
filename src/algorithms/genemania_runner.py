@@ -1,0 +1,90 @@
+
+import time
+import src.algorithms.genemania as genemania
+import src.algorithms.alg_utils as alg_utils
+from tqdm import tqdm, trange
+
+
+def setupInputs(run_obj):
+    # setup the output file
+
+    # may need to make sure the inputs match
+    ## if there are more annotations than nodes in the network, then trim the extra pos/neg nodes
+    #num_nodes = self.P.shape[0] if self.weight_gm2008 is False else self.normalized_nets[0].shape[0]
+    #if len(self.prots) > num_nodes: 
+    #    positives = positives[np.where(positives < num_nodes)]
+    #    negatives = negatives[np.where(negatives < num_nodes)]
+
+    # extract the variables out of the annotation object
+    run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
+    run_obj.goids = run_obj.ann_obj.goids
+
+    # Build the laplacian(?)
+    if run_obj.net_obj.weight_swsn:
+        W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
+        run_obj.L = genemania.setup_laplacian(W)
+        run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
+    elif run_obj.net_obj.weight_gm2008:
+        # this will be handled on a GO term by GO term basis
+        run_obj.L = None
+    else:
+        run_obj.L = genemania.setup_laplacian(run_obj.net_obj.W)
+
+    # also setup the output folder/file
+    run_obj.params_str = setup_params_str(run_obj.params, run_obj.weight_str)
+        
+    return
+
+
+# setup the params_str used in the output file
+def setup_params_str(run_obj):
+    params_str = "-%stol%s" % (
+        run_obj.weight_str, str(run_obj.params['tol']).replace('.','_'))
+    return params_str
+
+
+# nothing to do here
+def setupOutputs(run_obj):
+    return
+
+
+def run(run_obj):
+    """
+    Function to run GeneMANIA
+    """
+    params_results = run_obj.params_results 
+    goid_scores = run_obj.goid_scores 
+
+    L = run_obj.L
+    alg = run_obj.name
+
+    # run GeneMANIA on each GO term individually
+    for i in trange(run_obj.ann_matrix.shape[0]):
+        goid = run_obj.goids[i]
+        # get the row corresponding to the current goids annotations 
+        y = run_obj.ann_matrix[i,:]
+
+        if run_obj.net_obj.weight_gm2008 is True:
+            start_time = time.process_time()
+            # weight the network for each GO term individually
+            W, process_time = run_obj.net_obj.weight_GM2008(y, goid)
+            L = genemania.setup_laplacian(W)
+            params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
+
+        # now actually run the algorithm
+        scores, process_time, wall_time, iters = genemania.runGeneMANIA(L, y, tol=float(run_obj.params['tol']), verbose=run_obj.kwargs.get('verbose', False))
+        tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
+                "(%0.3f sec, %0.3f wall_time) for %s" % (process_time, wall_time, goid))
+
+        ## if they're different dimensions, then set the others to zeros 
+        #if len(scores_arr) < goid_scores.shape[1]:
+        #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
+        goid_scores[i] = scores
+
+        # also keep track of the time it takes for each of the parameter sets
+        params_results["%s_wall_time"%alg] += wall_time
+        params_results["%s_process_time"%alg] += process_time
+
+    run_obj.goid_scores = goid_scores
+    run_obj.params_results = params_results
+    return

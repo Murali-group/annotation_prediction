@@ -5,7 +5,7 @@
 
 import os, sys, time
 from optparse import OptionParser, OptionGroup
-import src.version_settings as v_settings
+#import src.version_settings as v_settings
 import src.utils.file_utils as utils
 from src.utils.string_utils import full_column_names, \
     STRING_NETWORKS, NON_TRANSFERRED_STRING_NETWORKS, \
@@ -20,169 +20,244 @@ from scipy import sparse
 from tqdm import tqdm
 
 
-def parse_args(args):
-    ## Parse command line args.
-    usage = '%s [options]\n' % (sys.argv[0])
-    parser = OptionParser(usage=usage)
-
-    # general parameters
-    group = OptionGroup(parser, 'Main Options')
-    group.add_option('','--version',type='string', action='append',
-            help="Version of the PPI to run. Can specify multiple versions and they will run one after the other. " +
-            "Default = '2017_10-string'" +
-            "Options are: %s." % (', '.join(v_settings.ALLOWEDVERSIONS)))
-    group.add_option('', '--pos-neg-file', type='string', action='append',
-            help="File containing positive and negative examples for each GO term. Required")
-    group.add_option('-o', '--out-pref-net', type='string',
-            help="Output prefix for the network file to create. " +
-                     "Default: %s" % ('TODO'))
-    group.add_option('', '--out-pref-ann', type='string',
-            help="Output prefix for the annotations file to create. " +
-                     "Default: %s" % ('TODO'))
-    parser.add_option_group(group)
-
-    # options to limit the # of GO terms or species
-    group = OptionGroup(parser, 'Limitting options')
-    group.add_option('', '--only-functions', type='string',
-            help="Run GAIN using only the functions in a specified " +
-            "file. If not specified, all functions will be used.")
-    group.add_option('-G', '--goterm', type='string', action="append",
-            help="Specify the GO terms to use (should be in GO:00XX format)")
-    group.add_option('-T', '--taxon', type='string', action="append",
-            help="Specify the species taxonomy ID to use.")
-    parser.add_option_group(group)
-
-    # parameters for STRING networks
-    group = OptionGroup(parser, 'STRING options')
-    group.add_option('', '--only-combined', action="store_true", default=False,
-            help="Use only the STRING combined network: \n\tcombined_score")
-    group.add_option('', '--only-core', action="store_true", default=False,
-            help="Use only the 6 core networks: \n\t%s" % (', '.join(CORE_STRING_NETWORKS)))
-    group.add_option('', '--non-transferred', action="store_true", default=False,
-            help="Use all non-transferred networks: \n\t%s" % (', '.join(NON_TRANSFERRED_STRING_NETWORKS)))
-    group.add_option('', '--all-string', action="store_true", default=False,
-            help="Use all individual 13 STRING networks: \n\t%s" % (', '.join(STRING_NETWORKS)))
-    group.add_option('-S', '--string-networks', type='string', 
-            help="Comma-separated list of string networks to use. " +
-                 "If specified, other STRING options will be ignored.")
-    parser.add_option_group(group)
-
-    # additional parameters
-    group = OptionGroup(parser, 'Additional options')
-    group.add_option('', '--weight-SWSN', type='string', 
-            help="Weight and combine the networks using the" +
-                 "Simultaneous Weights with Specific Negatives method." +
-                 "Must specify a prefix for the network")
-    group.add_option('', '--forcenet', action="store_true", default=False,
-                     help="Force re-building network matrix from scratch")
-    #group.add_option('', '--verbose', action="store_true", default=False,
-    #                 help="Print additional info about running times and such")
-    parser.add_option_group(group)
-
-    (opts, args) = parser.parse_args(args)
-
-    if opts.pos_neg_file is None:
-        print("--pos-neg-file required")
-        sys.exit(1)
-
-    for f in opts.pos_neg_file:
-        if not os.path.isfile(f):
-            print("ERROR: --pos-neg-file '%s' not found" % (f))
-            sys.exit(1)
-
-    if opts.version is None:
-        opts.version = ["2018_06-seq-sim-e0_1-string"]
-
-    for version in opts.version:
-        if version not in v_settings.ALLOWEDVERSIONS:
-            print("ERROR: '%s' not an allowed version. Options are: %s." % (version, ', '.join(v_settings.ALLOWEDVERSIONS)))
-            sys.exit(1)
-
-    return opts
-
-
-def main(versions, pos_neg_files, goterms=None, taxons=None,
-         out_pref_net=None, out_pref_ann=None,
-         string_networks=["combined_score"],
-         string_cutoff=400,
-         weight_swsn=None, forcenet=False,
-):
-
-    for version in versions:
-        INPUTSPREFIX, RESULTSPREFIX, network_file, selected_strains = v_settings.set_version(version)
-
-        if out_pref_net is None:
-            out_pref_net = '%s/sparse_nets/' % (INPUTSPREFIX)
-        utils.checkDir(os.path.dirname(out_pref_net))
-        if out_pref_ann is None:
-            out_pref_ann = '%s/sparse_nets/' % (INPUTSPREFIX)
-        utils.checkDir(os.path.dirname(out_pref_ann))
-
-        if taxons is not None:
-            for taxon in taxons:
-                out_pref = "%s%s-" % (out_pref_net, taxon)
-                sparse_networks, network_names, nodes = create_sparse_net_file(
-                    version, out_pref, taxon=taxon,
-                    string_nets=string_networks, string_cutoff=string_cutoff,
-                    forcenet=forcenet)
-
-                out_pref = "%s%s-" % (out_pref_ann, taxon)
-                ann_matrix, goids = create_sparse_ann_file(
-                    out_pref, pos_neg_files, goterms, nodes,
-                    selected_strains=selected_strains, taxon=taxon)
-
-                if weight_swsn:
-                    out_file = "%s%s-%d-nets-combined-SWSN.npz" % (
-                        weight_swsn, taxon, len(sparse_networks))
-                    weight_SWSN(ann_matrix, sparse_networks,
-                                net_names=network_names, out_file=out_file,
-                                nodes=nodes)
+class Sparse_Networks:
+    """
+    An object to hold the sparse network (or sparse networks if they are to be joined later), 
+        the list of nodes giving the index of each node, and a mapping from node name to index
+    """
+    def __init__(self, sparse_networks, nodes, net_names=None,
+                 weight_swsn=False, weight_gm2008=False, unweighted=False):
+        if isinstance(sparse_networks, list):
+            self.sparse_networks = sparse_networks
+            self.multi_net = True
         else:
-            sparse_networks, network_names, nodes = create_sparse_net_file(
-                version, out_pref_net, selected_strains=selected_strains,
-                string_nets=string_networks, string_cutoff=string_cutoff,
-                forcenet=forcenet)
+            self.W = sparse_networks
+            self.multi_net = False
+        self.nodes = nodes
+        # used to map from node/prot to the index and vice versa
+        self.node2idx = {n: i for i, n in enumerate(nodes)}
+        self.net_names = net_names
+        self.weight_swsn = weight_swsn
+        self.weight_gm2008 = weight_gm2008
+        self.unweighted = unweighted
 
-            # now write the annotations
-            ann_matrix, goids = create_sparse_ann_file(
-                out_pref_ann, pos_neg_files, goterms, nodes,
-                selected_strains=selected_strains)
+        if self.unweighted is True:
+            print("\tsetting all edge weights to 1 (unweighted)")
+            if self.multi_net is False:
+                # convert all of the entries to 1s to "unweight" the network
+                self.W = (self.W > 0).astype(int) 
+            else:
+                new_sparse_networks = []
+                for i in range(len(self.sparse_networks)):
+                    net = self.sparse_networks[i]
+                    # convert all of the entries to 1s to "unweight" the network
+                    net = (net > 0).astype(int) 
+                    new_sparse_networks.append(net)
+                self.sparse_networks = new_sparse_networks
 
-            if weight_swsn:
-                out_file = "%s%d-nets-combined-SWSN.npz" % (
-                    weight_swsn, len(sparse_networks))
-                weight_SWSN(ann_matrix, sparse_networks,
-                            net_names=network_names, out_file=out_file,
-                            nodes=nodes)
+        if self.multi_net is True:
+            print("\tnormalizing the networks")
+            self.normalized_nets = []
+            for net in self.sparse_networks:
+                self.normalized_nets.append(setup._net_normalize(net))
+
+    def SWSN(self, ann_matrix):
+        return weight_SWSN(ann_matrix, self.normalized_nets,
+                           net_names=self.net_names, nodes=self.nodes)
+
+    def weight_GM2008(self, y, goid):
+        return weight_GM2008(y, self.normalized_nets, self.net_names, goid)
+
+
+class Sparse_Annotations:
+    """
+    An object to hold the sparse annotations (including negative examples as -1),
+        the list of GO term IDs giving the index of each term, and a mapping from term to index
+    """
+    def __init__(self, ann_matrix, goids, prots):
+        self.ann_matrix = ann_matrix
+        self.goids = goids
+        # used to map from index to goid and vice versa
+        self.goid2idx = {g: i for i, g in enumerate(goids)}
+        self.prots = prots
+        # used to map from node/prot to the index and vice versa
+        self.node2idx = {n: i for i, n in enumerate(prots)}
+
+
+#def parse_args(args):
+#    ## Parse command line args.
+#    usage = '%s [options]\n' % (sys.argv[0])
+#    parser = OptionParser(usage=usage)
+#
+#    # general parameters
+#    group = OptionGroup(parser, 'Main Options')
+#    group.add_option('','--version',type='string', action='append',
+#            help="Version of the PPI to run. Can specify multiple versions and they will run one after the other. " +
+#            "Default = '2017_10-string'" +
+#            "Options are: %s." % (', '.join(v_settings.ALLOWEDVERSIONS)))
+#    group.add_option('', '--pos-neg-file', type='string', action='append',
+#            help="File containing positive and negative examples for each GO term. Required")
+#    group.add_option('-o', '--out-pref-net', type='string',
+#            help="Output prefix for the network file to create. " +
+#                     "Default: %s" % ('TODO'))
+#    group.add_option('', '--out-pref-ann', type='string',
+#            help="Output prefix for the annotations file to create. " +
+#                     "Default: %s" % ('TODO'))
+#    parser.add_option_group(group)
+#
+#    # options to limit the # of GO terms or species
+#    group = OptionGroup(parser, 'Limitting options')
+#    group.add_option('', '--only-functions', type='string',
+#            help="Run GAIN using only the functions in a specified " +
+#            "file. If not specified, all functions will be used.")
+#    group.add_option('-G', '--goterm', type='string', action="append",
+#            help="Specify the GO terms to use (should be in GO:00XX format)")
+#    group.add_option('-T', '--taxon', type='string', action="append",
+#            help="Specify the species taxonomy ID to use.")
+#    parser.add_option_group(group)
+#
+#    # parameters for STRING networks
+#    group = OptionGroup(parser, 'STRING options')
+#    group.add_option('', '--only-combined', action="store_true", default=False,
+#            help="Use only the STRING combined network: \n\tcombined_score")
+#    group.add_option('', '--only-core', action="store_true", default=False,
+#            help="Use only the 6 core networks: \n\t%s" % (', '.join(CORE_STRING_NETWORKS)))
+#    group.add_option('', '--non-transferred', action="store_true", default=False,
+#            help="Use all non-transferred networks: \n\t%s" % (', '.join(NON_TRANSFERRED_STRING_NETWORKS)))
+#    group.add_option('', '--all-string', action="store_true", default=False,
+#            help="Use all individual 13 STRING networks: \n\t%s" % (', '.join(STRING_NETWORKS)))
+#    group.add_option('-S', '--string-networks', type='string', 
+#            help="Comma-separated list of string networks to use. " +
+#                 "If specified, other STRING options will be ignored.")
+#    parser.add_option_group(group)
+#
+#    # additional parameters
+#    group = OptionGroup(parser, 'Additional options')
+#    group.add_option('', '--weight-SWSN', type='string', 
+#            help="Weight and combine the networks using the" +
+#                 "Simultaneous Weights with Specific Negatives method." +
+#                 "Must specify a prefix for the network")
+#    group.add_option('', '--forcenet', action="store_true", default=False,
+#                     help="Force re-building network matrix from scratch")
+#    #group.add_option('', '--verbose', action="store_true", default=False,
+#    #                 help="Print additional info about running times and such")
+#    parser.add_option_group(group)
+#
+#    (opts, args) = parser.parse_args(args)
+#
+#    if opts.pos_neg_file is None:
+#        print("--pos-neg-file required")
+#        sys.exit(1)
+#
+#    for f in opts.pos_neg_file:
+#        if not os.path.isfile(f):
+#            print("ERROR: --pos-neg-file '%s' not found" % (f))
+#            sys.exit(1)
+#
+#    if opts.version is None:
+#        opts.version = ["2018_06-seq-sim-e0_1-string"]
+#
+#    for version in opts.version:
+#        if version not in v_settings.ALLOWEDVERSIONS:
+#            print("ERROR: '%s' not an allowed version. Options are: %s." % (version, ', '.join(v_settings.ALLOWEDVERSIONS)))
+#            sys.exit(1)
+#
+#    return opts
+#
+#
+#def main(versions, pos_neg_files, goterms=None, taxons=None,
+#         out_pref_net=None, out_pref_ann=None,
+#         string_networks=["combined_score"],
+#         string_cutoff=400,
+#         weight_swsn=None, forcenet=False,
+#):
+#
+#    for version in versions:
+#        INPUTSPREFIX, RESULTSPREFIX, network_file, selected_strains = v_settings.set_version(version)
+#
+#        if out_pref_net is None:
+#            out_pref_net = '%s/sparse_nets/' % (INPUTSPREFIX)
+#        utils.checkDir(os.path.dirname(out_pref_net))
+#        if out_pref_ann is None:
+#            out_pref_ann = '%s/sparse_nets/' % (INPUTSPREFIX)
+#        utils.checkDir(os.path.dirname(out_pref_ann))
+#
+#        if taxons is not None:
+#            for taxon in taxons:
+#                out_pref = "%s%s-" % (out_pref_net, taxon)
+#                sparse_networks, network_names, nodes = create_sparse_net_file(
+#                    version, out_pref, taxon=taxon,
+#                    string_nets=string_networks, string_cutoff=string_cutoff,
+#                    forcenet=forcenet)
+#
+#                out_pref = "%s%s-" % (out_pref_ann, taxon)
+#                ann_matrix, goids = create_sparse_ann_file(
+#                    out_pref, pos_neg_files, goterms, nodes,
+#                    selected_strains=selected_strains, taxon=taxon)
+#
+#                if weight_swsn:
+#                    out_file = "%s%s-%d-nets-combined-SWSN.npz" % (
+#                        weight_swsn, taxon, len(sparse_networks))
+#                    weight_SWSN(ann_matrix, sparse_networks,
+#                                net_names=network_names, out_file=out_file,
+#                                nodes=nodes)
+#        else:
+#            sparse_networks, network_names, nodes = create_sparse_net_file(
+#                version, out_pref_net, selected_strains=selected_strains,
+#                string_nets=string_networks, string_cutoff=string_cutoff,
+#                forcenet=forcenet)
+#
+#            # now write the annotations
+#            ann_matrix, goids = create_sparse_ann_file(
+#                out_pref_ann, pos_neg_files, goterms, nodes,
+#                selected_strains=selected_strains)
+#
+#            if weight_swsn:
+#                out_file = "%s%d-nets-combined-SWSN.npz" % (
+#                    weight_swsn, len(sparse_networks))
+#                weight_SWSN(ann_matrix, sparse_networks,
+#                            net_names=network_names, out_file=out_file,
+#                            nodes=nodes)
+
+
+## TODO need to set this up again for FunGCAT
+#def create_sparse_net_file(
+#        version, out_pref, selected_strains=None, taxon=None, string_nets=[],
+#        string_file_cutoff=400, string_cutoff=None, forcenet=False):
+#    """
+#    *string_file_cutoff*: cutoff for the combined score in the name of the string file
+#    *string_cutoff*: This option allows you to use a higher cutoff than what the file has.
+#        If None, then all edges in the string file will be used.  
+#    """
+#
+#    net_files = []
+#    string_net_files = []
+#    if taxon is not None:
+#        network_file = v_settings.STRING_TAXON_UNIPROT_FULL % (taxon, taxon, string_file_cutoff)
+#        #ann_file = v_settings.FUN_FILE % (self.taxon, self.taxon)
+#        string_net_files.append(network_file)
+#
+#    else:
+#        # use all of the networks available to this version by default
+#        if 'SEQ_SIM' in v_settings.NETWORK_VERSION_INPUTS[version]:
+#            # load the seq sim network for this version
+#            net_files.append(v_settings.SEQ_SIM_NETWORKS[version])
+#        if 'STRING' in v_settings.NETWORK_VERSION_INPUTS[version]:
+#            # and all of the string networks available
+#            for taxon in selected_strains:
+#                net_file = v_settings.STRING_TAXON_UNIPROT_FULL % (taxon, taxon, string_file_cutoff)
+#                string_net_files.append(net_file)
 
 
 def create_sparse_net_file(
-        version, out_pref, selected_strains=None, taxon=None, string_nets=[],
-        string_file_cutoff=400, string_cutoff=None, forcenet=False):
-    """
-    *string_file_cutoff*: cutoff for the combined score in the name of the string file
-    *string_cutoff*: This option allows you to use a higher cutoff than what the file has.
-        If None, then all edges in the string file will be used.  
-    """
-
-    net_files = []
-    string_net_files = []
-    if taxon is not None:
-        network_file = v_settings.STRING_TAXON_UNIPROT_FULL % (taxon, taxon, string_file_cutoff)
-        #ann_file = v_settings.FUN_FILE % (self.taxon, self.taxon)
-        string_net_files.append(network_file)
-
-    else:
-        # use all of the networks available to this version by default
-        if 'SEQ_SIM' in v_settings.NETWORK_VERSION_INPUTS[version]:
-            # load the seq sim network for this version
-            net_files.append(v_settings.SEQ_SIM_NETWORKS[version])
-        if 'STRING' in v_settings.NETWORK_VERSION_INPUTS[version]:
-            # and all of the string networks available
-            for taxon in selected_strains:
-                net_file = v_settings.STRING_TAXON_UNIPROT_FULL % (taxon, taxon, string_file_cutoff)
-                string_net_files.append(net_file)
-
+        out_pref, net_files=[], string_net_files=[], 
+        string_nets=STRING_NETWORKS, string_cutoff=None, forcenet=False):
+    # if there aren't any string net files, then set the string nets to empty
+    if len(string_net_files) == 0:
+        string_nets = [] 
+    # if there are string_net_files, and string_nets is None, set it back to its default
+    elif string_nets is None:
+        string_nets = STRING_NETWORKS
     # the node IDs should be the same for each of the networks,
     # so no need to include the # in the ids file
     num_networks = len(net_files) + len(string_nets)
@@ -352,7 +427,8 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
         1,0,-1 for pos,unk,neg values
         2) List of goterms in the order in which they appear in the matrix
     """
-    # TODO figure out a better way to keep track of the file
+    # TODO store the annotations in sparse matrix form, then load the sparse matrix directly
+    # In the case of specific goterms passed in, load the matrix, then keep only the specified goterms 
     #num_goterms = 6
     #h = "bp"
     #ann_file = "%s/%s-%d-annotations.npz" % (out_dir, h, num_goterms)
@@ -366,23 +442,11 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
     #    goids = utils.readItemList(goids_file, 1)
     #else:
     print("\nSetting up annotation matrix")
-    #selected_species_file = v_settings.VERSION_SELECTED_STRAINS[version]
-    #selected_species = utils.readDict(selected_species_file, 1, 2)
 
-    # this file just has the direct GO annotations (not propagated)
-    #gaf_file = "/data/inputs/goa/taxon/19-strains-goa.gaf"
-    #ev_codes = "rem-neg-iea"
-    #h = "bp"
-    ## TODO make a pos_neg_file for each species
-    #pos_neg_files = [
-    #        "inputs/pos-neg/%s/pos-neg-%s-50-list.tsv" % (ev_codes, h),] 
-    ##        "inputs/pos-neg/%s/pos-neg-mf-50-list.tsv" % (ev_codes),]
     # UPDATE 2018-10-22: build the matrix while parsing the file
     #goid_pos, goid_neg = alg_utils.parse_pos_neg_files(pos_neg_files, goterms=goterms) 
     node2idx = {prot: i for i, prot in enumerate(prots)}
 
-    # TODO store the annotations in sparse matrix form, then load the sparse matrix directly
-    # In the case of specific goterms passed in, load the matrix, then keep only the specified goterms 
     print("Reading positive and negative annotations for each protein from %s" % (pos_neg_file))
 #def build_sparse_matrix(data, rows, cols):
     # rather than explicity building the matrix, use the indices to build a coordinate matrix
@@ -418,7 +482,6 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
             total += 1
     # read the file to build the matrix
     with open(pos_neg_file, 'r') as f:
-        #for line in f:
         for line in tqdm(f, total=total, disable=True if total < 250 else False):
             if line[0] == '#':
                 continue
@@ -456,6 +519,7 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
 def weight_GM2008(y, normalized_nets, net_names=None, goid=None):
     """ TODO DOC
     """
+    start_time = time.process_time()
     if goid is not None:
         print("\tgoid %s: %d positives, %d negatives" % (goid, len(np.where(y > 0)[0]), len(np.where(y < 0)[0])))
     alphas, indices = findKernelWeights(y, normalized_nets)
@@ -468,9 +532,10 @@ def weight_GM2008(y, normalized_nets, net_names=None, goid=None):
     combined_network = alphas[0]*normalized_nets[indices[0]]
     for i in range(1,len(alphas)):
         combined_network += alphas[i]*normalized_nets[indices[i]] 
+    total_time = time.process_time() - start_time
 
     # don't write each goterm's combined network to a file
-    return combined_network
+    return combined_network, total_time
 
 
 def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=None):
@@ -559,40 +624,40 @@ def _net_normalize(X):
     return X
 
 
-def run():
-    #versions = ["2017_10-seq-sim", "2017_10-seq-sim-x5-string"]
-    opts = parse_args(sys.argv)
-    goterms = alg_utils.select_goterms(
-            only_functions_file=opts.only_functions, goterms=opts.goterm) 
-    if goterms is not None:
-        print("%d GO terms from only_functions_file and/or specified GO terms" % (len(goterms)))
-
-    #goid_pos, goid_neg = alg_utils.parse_pos_neg_files(opts.pos_neg_file) 
-
-    # setup the selection of string networks 
-    string_networks = []
-    if opts.string_networks:
-        string_networks = opts.string_networks.split(',')
-        for net in string_networks:
-            if net not in STRING_NETWORKS:
-                print("ERROR: STRING network '%s' not one of the" +
-                      "available choices which are: \n\t%s" % (net, ', '.join(STRING_NETWORKS)))
-                sys.exit(1)
-    elif opts.only_combined:
-        string_networks = ['combined_score']
-    elif opts.only_core:
-        string_networks = CORE_STRING_NETWORKS
-    elif opts.non_transferred:
-        string_networks = NON_TRANSFERRED_STRING_NETWORKS
-    elif opts.all_string:
-        string_networks = STRING_NETWORKS
-
-    main(opts.version, opts.pos_neg_file, goterms=goterms, taxons=opts.taxon,
-         out_pref_net=opts.out_pref_net, out_pref_ann=opts.out_pref_ann,
-         string_networks=string_networks, string_cutoff=v_settings.VERSION_STRING_CUTOFF[opts.version],
-         weight_swsn=opts.weight_SWSN, forcenet=opts.forcenet
-    )
-
-
-if __name__ == "__main__":
-    run()
+#def run():
+#    #versions = ["2017_10-seq-sim", "2017_10-seq-sim-x5-string"]
+#    opts = parse_args(sys.argv)
+#    goterms = alg_utils.select_goterms(
+#            only_functions_file=opts.only_functions, goterms=opts.goterm) 
+#    if goterms is not None:
+#        print("%d GO terms from only_functions_file and/or specified GO terms" % (len(goterms)))
+#
+#    #goid_pos, goid_neg = alg_utils.parse_pos_neg_files(opts.pos_neg_file) 
+#
+#    # setup the selection of string networks 
+#    string_networks = []
+#    if opts.string_networks:
+#        string_networks = opts.string_networks.split(',')
+#        for net in string_networks:
+#            if net not in STRING_NETWORKS:
+#                print("ERROR: STRING network '%s' not one of the" +
+#                      "available choices which are: \n\t%s" % (net, ', '.join(STRING_NETWORKS)))
+#                sys.exit(1)
+#    elif opts.only_combined:
+#        string_networks = ['combined_score']
+#    elif opts.only_core:
+#        string_networks = CORE_STRING_NETWORKS
+#    elif opts.non_transferred:
+#        string_networks = NON_TRANSFERRED_STRING_NETWORKS
+#    elif opts.all_string:
+#        string_networks = STRING_NETWORKS
+#
+#    main(opts.version, opts.pos_neg_file, goterms=goterms, taxons=opts.taxon,
+#         out_pref_net=opts.out_pref_net, out_pref_ann=opts.out_pref_ann,
+#         string_networks=string_networks, string_cutoff=v_settings.VERSION_STRING_CUTOFF[opts.version],
+#         weight_swsn=opts.weight_SWSN, forcenet=opts.forcenet
+#    )
+#
+#
+#if __name__ == "__main__":
+#    run()

@@ -1,7 +1,6 @@
 
 import sys, os
 from optparse import OptionParser, OptionGroup
-import src.version_settings as v_settings
 import src.utils.file_utils as utils
 import src.setup_sparse_networks as ssn
 import src.algorithms.alg_utils as alg_utils
@@ -26,8 +25,8 @@ def parse_args(args):
                      help="File containing positive and negative examples for each GO term. Must use either this or the --gaf-file option")
     group.add_option('-g', '--gaf-file', type='string',
                      help="File containing GO annotations in GAF format. Annotations will not be propagated")
-    group.add_option('-b', '--obo-file', type='string', default=v_settings.GO_FILE,
-                     help="GO OBO file which contains the GO DAG. Default: %s" % (v_settings.GO_FILE))
+    group.add_option('-b', '--obo-file', type='string', 
+                     help="GO OBO file which contains the GO DAG.") 
     group.add_option('-H', '--hierarchy', type='string', default='bp',
                      help="Hierarchy to use when creating the matrices and running BirgRank. Default: 'bp'")
     group.add_option('', '--ignore-ec', type='string',
