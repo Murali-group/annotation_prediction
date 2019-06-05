@@ -3,13 +3,7 @@
 input_settings:
 
     # Base input directory
-    #input_dir: "inputs"
-    input_dir: "/home/jeffl/git-workspace/igacat/FastSinkSource/inputs"
-
-    # path to file containing the selected strains 
-    #    from input_dir/
-    # shouldn't be needed for run_algs.py
-    #selected_strains: ""
+    input_dir: "inputs"
 
     # Denotes a list of experiments to run, each with the folling specified:
     #   net_version: name to give this network. Will be used to organize output files 
@@ -35,14 +29,15 @@ input_settings:
         - net_version: "2018_06-seq-sim-e0_1"
           net_file: "2018_06-seq-sim-e0_1-net.txt"
           #string_net_files: [""]
-          exp_name: "gogogo"
+          exp_name: "example"
           pos_neg_file: "pos-neg/expc/expc-bp.tsv"
           only_functions_file: ""
           # if multiple networks are present in the net file,
           # set multi_net to True and use these settings
           multi_net: False
           net_settings:
-              # path to the network names file from input_dir/net_version
+              # path to the network names file from input_dir/net_version.
+              # not needed if string_net_files are passed directly
               net_names_file: ""
               # path to the node idx file
               node_ids_file: ""
@@ -60,8 +55,8 @@ input_settings:
 output_settings:
     output_dir: "outputs/"
 
-# Algorithms to run along with their settings
-# TODO allow multiple combinations of parameters
+# Algorithms to run along with their settings.
+# All combinations of parameters will be run. 
 algs: 
     # local has no parameters
     local:
@@ -74,6 +69,7 @@ algs:
         max_iters: [10]
     
     # sinksource-bounds
+    # TODO finish refactoring 
     sinksource-bounds:
         should_run: [False]
         rank_all: [False]
@@ -91,7 +87,7 @@ algs:
     birgrank:
         should_run: [False]
         # path to the OBO file from the input_dir
-        obo_file: ["/data/inputs/goa/2017_09/2017-09-26-go.obo"]
+        obo_file: ["inputs/goa/2017_09/2017-09-26-go.obo"]
         alpha: [.5]
         lambda: [.5]
         mu: [.5]
@@ -101,9 +97,9 @@ algs:
     
     # aptrank
     aptrank:
-        should_run: [True]
+        should_run: [False]
         # path to the OBO file from the input_dir
-        obo_file: ["/data/inputs/goa/2017_09/2017-09-26-go.obo"]
+        obo_file: ["inputs/goa/2017_09/2017-09-26-go.obo"]
         lambda: [.5]
         k: [8]
         s: [5]
