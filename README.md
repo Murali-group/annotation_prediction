@@ -1,5 +1,5 @@
 # FastSinkSource
-This is the main repository for the paper "Accurate and Efficient Gene Function Prediction using aMulti-Bacterial Network".
+This is the main repository for the paper "Accurate and Efficient Gene Function Prediction using a Multi-Bacterial Network".
 
 ## Installation
 These scripts requires Python 3 due to the use of obonet to build the GO DAG.
