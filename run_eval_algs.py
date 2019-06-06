@@ -9,10 +9,9 @@ from tqdm import tqdm
 import time
 import numpy as np
 from scipy import sparse
-# my packages
-# see if we can add the base folder
+# packages in this repo
+# add this file's directory to the path so these imports work from anywhere
 sys.path.append(os.path.dirname(__file__))
-print(sys.path)
 import src.setup_sparse_networks as setup
 import src.algorithms.alg_utils as alg_utils
 import src.algorithms.runner as runner
@@ -149,13 +148,15 @@ def get_algs_to_run(alg_settings):
     for alg in alg_settings:
         if alg_settings[alg].get('should_run', [True])[0] is True:
             algs.append(alg)
-    print("Algs to run: %s" % (', '.join(algs)))
     return algs
 
 
 def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
+    only_functions_file = None
+    if 'only_functions_file' in dataset:
+        only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
     selected_goterms = alg_utils.select_goterms(
-            only_functions_file=dataset.get('only_functions', None), goterms=kwargs['goterm']) 
+            only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
 
     net_obj = setup_net(input_dir, dataset, **kwargs)
 
@@ -182,6 +183,7 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
 def setup_runners(alg_settings, net_obj, ann_obj, out_dir, **kwargs):
     # these are the algs with 'should_run' set to [True]
     algs = get_algs_to_run(alg_settings)
+    print("Algs to run: %s" % (', '.join(algs)))
 
     alg_runners = []
     for alg in algs:

@@ -12,7 +12,7 @@ from collections import defaultdict
 #import networkx as nx
 import numpy as np
 from scipy.sparse import csr_matrix
-import src.algorithms.alg_utils
+import src.algorithms.alg_utils as alg_utils
 import random
 from scipy.stats import kendalltau  #, spearmanr, weightedtau
 
@@ -25,7 +25,6 @@ class SinkSourceBounds:
                  max_iters=1000):
         """
         *P*: Row-normalized sparse-matrix representation of the graph
-        *f*: initial vector f of amount of score received from positive nodes
         *rank_all*: require that the ranks of all nodes be fixed using their UB and LB
         *rank_pos_neg*: tuple of sets of positive and negative nodes. 
             We only require that the LB and UB of positives not overlap with any negative nodes.
@@ -49,9 +48,7 @@ class SinkSourceBounds:
 
     def runSinkSourceBounds(self):
         self.num_nodes = self.P.shape[0]
-        # TODO this should be done once before all predictions are being made
-        # check to make sure the graph is normalized because making a copy can take a long time
-        #G = alg_utils.normalizeGraphEdgeWeights(G)
+        # f: initial vector f of amount of score received from positive nodes
         self.P, self.f, self.node2idx, self.idx2node = alg_utils.setup_fixed_scores(
             self.P, self.positives, self.negatives, a=self.a, 
             remove_nonreachable=True, verbose=self.verbose)

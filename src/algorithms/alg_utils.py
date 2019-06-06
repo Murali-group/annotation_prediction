@@ -64,9 +64,7 @@ def select_goterms(only_functions_file=None, goterms=None):
     selected_goterms = set()
     if only_functions_file is not None:
         selected_goterms = utils.readItemSet(only_functions_file, 1)
-        # if the leading GO ID isn't present, then add it
-        if list(selected_goterms)[0][0:3] != "GO:":
-            selected_goterms = set(["GO:" + "0"*(7-len(str(x))) + str(x) for x in selected_goterms])
+        print("%d functions from only_functions_file: %s" % (len(selected_goterms), only_functions_file))
     goterms = set() if goterms is None else set(goterms)
     selected_goterms.update(goterms)
     if len(selected_goterms) == 0:
