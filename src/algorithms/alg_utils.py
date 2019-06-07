@@ -76,17 +76,11 @@ def parse_pos_neg_files(pos_neg_files, goterms=None):
     # get the positives and negatives from the matrix
     all_goid_prots = {}
     all_goid_neg = {}
-    if len(pos_neg_files) == 1 and pos_neg_files[0] == '-':
-        print("Using GAIN annotations instead of pos_neg_file")
-        # TODO compare the predictions made by GAIN and my implementation
-        all_goid_prots = parse_gain_file(f_settings.GOA_ALL_FUN_FILE_NOIEA)
-        all_goid_neg = {goid: set() for goid in all_goid_prots} 
-    else:
-        for pos_neg_file in pos_neg_files:
-            #goid_prots, goid_neg = self.parse_pos_neg_matrix(self.pos_neg_file)
-            goid_prots, goid_neg = parse_pos_neg_file(pos_neg_file, goterms=goterms)
-            all_goid_prots.update(goid_prots)
-            all_goid_neg.update(goid_neg)
+    for pos_neg_file in pos_neg_files:
+        #goid_prots, goid_neg = self.parse_pos_neg_matrix(self.pos_neg_file)
+        goid_prots, goid_neg = parse_pos_neg_file(pos_neg_file, goterms=goterms)
+        all_goid_prots.update(goid_prots)
+        all_goid_neg.update(goid_neg)
 
     return all_goid_prots, all_goid_neg
 
