@@ -11,14 +11,17 @@ try:
 except:
     print("\tFailed to import obonet")
 # TODO temporary fix to not require pandas to parse the obo file
-if __name__ == "__main__":
+try:
     import pandas as pd
+except:
+    print("\tFailed to import pandas")
 from tqdm import tqdm
 from scipy import sparse
+import gzip
 
 
 # Guide to GO evidence codes: http://geneontology.org/page/guide-go-evidence-codes
-ALL_EVIDENCE_CODES = ['EXP','IDA','IPI','IMP','IGI','IEP','ISS','ISO','ISA','ISM','IGC','IBA','IBD','IKR','IRD','RCA','TAS','NAS','IC','ND','IEA']
+ALL_EVIDENCE_CODES = ['EXP','IDA','IPI','IMP','IGI','IEP','HTP','HDA','HMP','HGI','HEP','ISS','ISO','ISA','ISM','IGC','IBA','IBD','IKR','IRD','RCA','TAS','NAS','IC','ND','IEA']
 
 # other global variables
 id_to_name = {}
@@ -221,10 +224,15 @@ def parse_gaf_file(gaf_file, pos_neg_ec=[], rem_neg_ec=[], ignore_ec=[]):
     num_rem_neg_ann = 0
     num_ignored_ann = 0 
     num_not_uniprot = 0
+    num_ev_code_unk = 0
+    # also print out the unknown evidence codes
+    ev_code_unk = set() 
 
     # if they pass in a GAF file:
-    with open(gaf_file, 'r') as f:
+    open_func = gzip.open if '.gz' in gaf_file else open
+    with open_func(gaf_file, 'r') as f:
         for line in f:
+            line = line.decode() if '.gz' in gaf_file else line
             cols = line.rstrip().split('\t')
             # if the prot is not a uniprot ID, then skip it
             prot_type = cols[0]
@@ -254,8 +262,13 @@ def parse_gaf_file(gaf_file, pos_neg_ec=[], rem_neg_ec=[], ignore_ec=[]):
                 num_rem_neg_ann += 1
                 goid_rem_neg_prots[goid].add(prot)
             else:
-                print("WARNING: evidence_code '%s' not recognized" % (evidence_code))
+                num_ev_code_unk += 1 
+                ev_code_unk.add(evidence_code)
+                #print("WARNING: evidence_code '%s' not recognized" % (evidence_code))
 
+    if len(ev_code_unk) > 0:
+        print("WARNING: evidence_codes not recognized: %s" % (', '.join(sorted(ev_code_unk))))
+        print("\t%d unknown evidence code entries ignored" % (num_ev_code_unk))
     print("\t%d non-uniprot entries ignored" % (num_not_uniprot))
     print("\t%d NOT annotations ignored" % (num_not_ann)) 
     print("\t%d \"pos_neg_ec\" annotations" % (num_pos_neg_ann))
@@ -511,7 +524,7 @@ def build_pos_neg_table(high_freq_goids, goid_pos, goid_neg, goid_unk, summary_o
         return df_summary
 
 
-def main(obo_file, gaf_file, out_pref, cutoff=1000, write_table=False,
+def main(obo_file, gaf_file, out_pref=None, cutoff=1000, write_table=False,
         pos_neg_ec=[], rem_neg_ec=[], ignore_ec=[]):
     global id_to_name, name_to_id, goid_to_category
 
@@ -522,6 +535,7 @@ def main(obo_file, gaf_file, out_pref, cutoff=1000, write_table=False,
 
     # keep track of the summary stats for each category, and combine them into one table in the end
     df_summaries = pd.DataFrame()
+    results = {}
 
     # assign the positives, negatives and unknowns for biological process and molecular function
     for c in ["P", "F"]:
@@ -545,17 +559,19 @@ def main(obo_file, gaf_file, out_pref, cutoff=1000, write_table=False,
         # keep track of the set of proteins with at least 1 annotation in this category to assign negatives later
         goid_pos, goid_neg, goid_unk = assign_all_pos_neg(high_freq_goids, G, revG, annotated_prots, all_prots, rem_negG=rem_negG)
 
-        # now write it to a file
         category = {"C": "cc", "P": "bp", "F": "mf"}
+        results[category[c]] = (goid_pos, goid_neg, goid_unk)
+        # now write it to a file
         if write_table is True:
             # build a table containing a positive/negative/unknown assignment for each protein-goterm pair
             df, df_summary = build_pos_neg_table(high_freq_goids, goid_pos, goid_neg, goid_unk)
             # combine the summary stats for all categories into one table
             df_summaries = pd.concat([df_summaries, df_summary])
 
-            out_file = "%spos-neg-%s-%d.tsv" % (out_pref, category[c], cutoff)
-            print("Writing table containing positive/negative/unknown assignments to %s" % (out_file))
-            df.to_csv(out_file, sep="\t")
+            if out_pref is not None:
+                out_file = "%spos-neg-%s-%d.tsv" % (out_pref, category[c], cutoff)
+                print("Writing table containing positive/negative/unknown assignments to %s" % (out_file))
+                df.to_csv(out_file, sep="\t")
         # TODO 
         #elif write_matrix is True:
         #    ann_matrix, goids = build_ann_matrix(goid_pos, goid_neg, prots)
@@ -566,19 +582,23 @@ def main(obo_file, gaf_file, out_pref, cutoff=1000, write_table=False,
             df_summary = build_pos_neg_table(high_freq_goids, goid_pos, goid_neg, goid_unk, summary_only=True)
             # combine the summary stats for all categories into one table
             df_summaries = pd.concat([df_summaries, df_summary])
-            out_file = "%spos-neg-%s-%d-list.tsv" % (out_pref, category[c], cutoff)
-            print("Writing file containing positive/negative assignments to %s" % (out_file))
-            with open(out_file, 'w') as out:
-                out.write("#goid\tpos/neg assignment\tprots\n")
-                for goid in high_freq_goids:
-                    out.write("%s\t1\t%s\n" % (goid, ','.join(goid_pos[goid])))
-                    out.write("%s\t-1\t%s\n" % (goid, ','.join(goid_neg[goid])))
+            if out_pref is not None:
+                out_file = "%spos-neg-%s-%d-list.tsv" % (out_pref, category[c], cutoff)
+                print("Writing file containing positive/negative assignments to %s" % (out_file))
+                with open(out_file, 'w') as out:
+                    out.write("#goid\tpos/neg assignment\tprots\n")
+                    for goid in high_freq_goids:
+                        out.write("%s\t1\t%s\n" % (goid, ','.join(goid_pos[goid])))
+                        out.write("%s\t-1\t%s\n" % (goid, ','.join(goid_neg[goid])))
 
-    output_summary_file = "%spos-neg-%d-summary-stats.tsv" % (out_pref, cutoff)
-    # maybe make this into an option later instead of always writing it
-    #if output_summary_file is not None:
-    print("Writing summary table of # of positive, negative and unknown examples for each GO term to: %s" % (output_summary_file))
-    df_summaries.to_csv(output_summary_file, sep='\t')
+    if out_pref is not None:
+        output_summary_file = "%spos-neg-%d-summary-stats.tsv" % (out_pref, cutoff)
+        # maybe make this into an option later instead of always writing it
+        #if output_summary_file is not None:
+        print("Writing summary table of # of positive, negative and unknown examples for each GO term to: %s" % (output_summary_file))
+        df_summaries.to_csv(output_summary_file, sep='\t')
+
+    return results, df_summaries
 
 
 def build_ann_matrix(goid_pos, goid_neg, prots):
