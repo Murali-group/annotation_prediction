@@ -286,7 +286,7 @@ def split_string_to_species(string_file, out_dir, species_to_split=None, score_c
                 # analagous to mkdir -p directory from the command line
                 if not os.path.isdir(out_dir):
                     os.makedirs(out_dir)
-                out_file = v_settings.STRING_TAXON_FILE % (curr_species, curr_species, score_cutoff)
+                out_file = STRING_TAXON_FILE % (curr_species, curr_species, score_cutoff)
                 tqdm.write("Writing new species interactions to '%s'" % (out_file))
                 if last_species != "":
                     # close the last file we had open
