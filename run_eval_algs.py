@@ -63,6 +63,8 @@ def setup_opts():
     group = OptionGroup(parser, 'Additional options')
     group.add_option('-W', '--num-pred-to-write', type='int', default=10,
                      help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
+    group.add_option('-N', '--factor-pred-to-write', type='float', 
+                     help="Write the predictions <factor>*num_pos for each term to file. For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
     group.add_option('', '--only-cv', action="store_true", default=False,
                      help="Perform cross-validation only")
     group.add_option('-C', '--cross-validation-folds', type='int',
@@ -104,29 +106,34 @@ def run():
 
 def setup_net(input_dir, dataset, **kwargs):
     # load the network matrix and protein IDs
+    net_file = None
     if 'net_file' in dataset:
-        net_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_file'])
+        if not isinstance(net_file, list):
+            net_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_file'])
+        else:
+            net_file = dataset['net_file']
     if dataset.get('multi_net',False) is True: 
         # if multiple file names are passed in, then map each one of them
-        if isinstance(net_file, list) or 'string_net_files' in datasets:
-            string_net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], string_net_file) for string_net_file in datasets['string_net_files']]
+        if isinstance(net_file, list) or 'string_net_files' in dataset:
+            string_net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], string_net_file) for string_net_file in dataset['string_net_files']]
             string_nets = None 
             if 'string_nets' in dataset['net_settings']:
                 string_nets = string_utils.convert_string_naming_scheme(dataset['net_settings']['string_nets'])
             # they all need to have the same rows and columns, which is handled by this function
             # this function also creates the multi net file if it doesn't exist
-            #sparse_nets, net_names, prots = setup.setup_sparse_networks(net_files=net_file)
-            # TODO add string net files
+            string_cutoff = dataset['net_settings'].get('string_cutoff', 150) 
+            out_pref = "%s/sparse-nets/c%d-" % (os.path.dirname(string_net_files[0]), string_cutoff)
+            utils.checkDir(os.path.dirname(out_pref))
             sparse_nets, net_names, prots = setup.create_sparse_net_file(
-                    net_files=net_file, string_net_files=string_net_files, 
+                    out_pref, net_files=net_file, string_net_files=string_net_files, 
                     string_nets=string_nets,
-                    string_cutoff=dataset['net_settings'].get('string_cutoff', None),
+                    string_cutoff=string_cutoff,
                     forcenet=kwargs['forcenet'])
         else:
             net_names_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_settings']['net_names_file'])
             node_ids_file  = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_settings']['node_ids_file'])
             sparse_nets, net_names, prots = alg_utils.read_multi_net_file(net_file, net_names_file, node_ids_file)
-        
+
         weight_method = dataset['net_settings']['weight_method'].lower()
         net_obj = setup.Sparse_Networks(
             sparse_nets, prots, net_names=net_names,
@@ -220,18 +227,33 @@ def run_algs(alg_runners, **kwargs):
         run_obj.setupOutputs()
 
         # write to file if specified
-        if kwargs['num_pred_to_write'] != 0:
+        num_pred_to_write = kwargs['num_pred_to_write']
+        if kwargs.get('factor_pred_to_write') is not None:
+            # make a dictionary with the # ann*factor for each term
+            num_pred_to_write = {} 
+            for i in range(run_obj.ann_matrix.shape[0]):
+                y = run_obj.ann_matrix[i,:]
+                positives = (y > 0).nonzero()[1]
+                num_pred_to_write[run_obj.goids[i]] = len(positives) * kwargs['factor_pred_to_write']
+        if num_pred_to_write != 0:
             out_file = "%s/pred%s.txt" % (run_obj.out_dir, run_obj.params_str)
             utils.checkDir(os.path.dirname(out_file)) 
             write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
-                         out_file, num_pred_to_write=kwargs['num_pred_to_write'])
+                         out_file, num_pred_to_write=num_pred_to_write)
 
     print("Finished")
 
 
 def write_output(goid_scores, goids, prots, out_file, num_pred_to_write=10):
+    """
+    *num_pred_to_write* can either be an integer, or a dictionary with a number of predictions to write for each term
+    """
     # now write the scores to a file
-    print("\twriting top %d scores to %s" % (num_pred_to_write, out_file))
+    if isinstance(num_pred_to_write, dict):
+        #print("\twriting top %d*num_pred scores to %s" % (kwargs['factor_pred_to_write'], out_file))
+        print("\twriting top <factor>*num_pred scores to %s" % (out_file))
+    else:
+        print("\twriting top %d scores to %s" % (num_pred_to_write, out_file))
 
     with open(out_file, 'w') as out:
         out.write("#goterm\tprot\tscore\n")
@@ -239,8 +261,11 @@ def write_output(goid_scores, goids, prots, out_file, num_pred_to_write=10):
             scores = goid_scores[i].toarray().flatten()
             # convert the nodes back to their names, and make a dictionary out of the scores
             scores = {prots[j]:s for j, s in enumerate(scores)}
+            num_to_write = num_pred_to_write
+            if isinstance(num_to_write, dict):
+                num_to_write = num_pred_to_write[goids[i]]
             write_scores_to_file(scores, goid=goids[i], file_handle=out,
-                    num_pred_to_write=num_pred_to_write)
+                    num_pred_to_write=int(num_to_write))
 
 
 def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
@@ -270,7 +295,7 @@ def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
     # write the scores to a file, up to the specified number of nodes (num_pred_to_write)
     file_handle.write(header)
     for n in sorted(scores, key=scores.get, reverse=True)[:num_pred_to_write]:
-        file_handle.write("%s\t%s\t%s\n" % (goid, n, str(scores[n])))
+        file_handle.write("%s\t%s\t%0.6e\n" % (goid, n, scores[n]))
     return
 
 

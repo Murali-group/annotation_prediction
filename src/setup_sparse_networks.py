@@ -18,6 +18,7 @@ import numpy as np
 from scipy.io import savemat, loadmat
 from scipy import sparse
 from tqdm import tqdm
+import gzip
 
 
 class Sparse_Networks:
@@ -59,9 +60,9 @@ class Sparse_Networks:
             print("\tnormalizing the networks")
             self.normalized_nets = []
             for net in self.sparse_networks:
-                self.normalized_nets.append(setup._net_normalize(net))
+                self.normalized_nets.append(_net_normalize(net))
 
-    def SWSN(self, ann_matrix):
+    def weight_SWSN(self, ann_matrix):
         return weight_SWSN(ann_matrix, self.normalized_nets,
                            net_names=self.net_names, nodes=self.nodes)
 
@@ -252,16 +253,21 @@ class Sparse_Annotations:
 def create_sparse_net_file(
         out_pref, net_files=[], string_net_files=[], 
         string_nets=STRING_NETWORKS, string_cutoff=None, forcenet=False):
+    if net_files is None:
+        net_files = []
     # if there aren't any string net files, then set the string nets to empty
     if len(string_net_files) == 0:
         string_nets = [] 
     # if there are string_net_files, and string_nets is None, set it back to its default
     elif string_nets is None:
         string_nets = STRING_NETWORKS
+    num_networks = len(net_files) + len(string_nets)
+    # if there is only 1 string network, then write the name instead of the number
+    if num_networks == 1 and len(string_nets) == 1:
+        num_networks = list(string_nets)[0] 
+    sparse_nets_file = "%s%s-sparse-nets.mat" % (out_pref, num_networks)
     # the node IDs should be the same for each of the networks,
     # so no need to include the # in the ids file
-    num_networks = len(net_files) + len(string_nets)
-    sparse_nets_file = "%s%d-sparse-nets.mat" % (out_pref, num_networks)
     node_ids_file = "%snode-ids.txt" % (out_pref)
     net_names_file = "%s%d-net-names.txt" % (out_pref, num_networks)
     if forcenet is False \
@@ -269,7 +275,7 @@ def create_sparse_net_file(
        and os.path.isfile(net_names_file):
         # read the files
         print("\treading sparse nets from %s" % (sparse_nets_file))
-        sparse_networks = loadmat(sparse_nets_file)['Networks'][0]
+        sparse_networks = list(loadmat(sparse_nets_file)['Networks'][0])
         print("\treading node ids file from %s" % (node_ids_file))
         nodes = utils.readItemList(node_ids_file, 1)
         print("\treading network_names from %s" % (net_names_file))
@@ -331,8 +337,10 @@ def setup_sparse_networks(net_files=[], string_net_files=[], string_nets=[], str
         name = os.path.basename(net_file)
         network_names.append(name)
         tqdm.write("Reading network from %s. Giving the name '%s'" % (net_file, name))
-        with open(net_file, 'r') as f:
+        open_func = gzip.open if '.gz' in net_file else open
+        with open_func(net_file, 'r') as f:
             for line in f:
+                line = line.decode() if '.gz' in net_file else line
                 if line[0] == "#":
                     continue
                 #u,v,w = line.rstrip().split('\t')[:3]
@@ -346,8 +354,10 @@ def setup_sparse_networks(net_files=[], string_net_files=[], string_nets=[], str
     # massive network for each of the string_nets specified 
     for string_net_file in tqdm(string_net_files):
         tqdm.write("Reading network from %s" % (string_net_file))
-        with open(string_net_file, 'r') as f:
+        open_func = gzip.open if '.gz' in string_net_file else open
+        with open_func(string_net_file, 'r') as f:
             for line in f:
+                line = line.decode() if '.gz' in string_net_file else line
                 if line[0] == "#":
                     continue
                 #u,v,w = line.rstrip().split('\t')[:3]
@@ -368,12 +378,11 @@ def setup_sparse_networks(net_files=[], string_net_files=[], string_nets=[], str
     print("\t%d nodes and %d edges" % (G.number_of_nodes(), G.number_of_edges()))
 
     print("\trelabeling node IDs with integers")
-    G, node2idx, idx2node = alg_utils.convert_nodes_to_int(G)
+    G, node2idx, idx2node = convert_nodes_to_int(G)
     # keep track of the ordering for later
     nodes = [idx2node[n] for n in sorted(idx2node)]
 
     print("\tconverting graph to sparse matrices")
-    #sparse_networks = np.zeros(len(net_files)+len(string_net_files), dtype=np.object)
     sparse_networks = []
     for i, net in enumerate(tqdm(network_names)):
         # all of the edges that don't have a weight for the specified network will be given a weight of 1
@@ -389,6 +398,19 @@ def setup_sparse_networks(net_files=[], string_net_files=[], string_nets=[], str
         sparse_networks.append(sparse_matrix)
 
     return sparse_networks, network_names, nodes
+
+
+def convert_nodes_to_int(G):
+    index = 0 
+    node2int = {}
+    int2node = {}
+    for n in sorted(G.nodes()):
+        node2int[n] = index
+        int2node[index] = n 
+        index += 1
+    # see also convert_node_labels_to_integers
+    G = nx.relabel_nodes(G,node2int, copy=False)
+    return G, node2int, int2node
 
 
 def create_sparse_ann_file(out_pref, pos_neg_files, goids, prots,
@@ -554,7 +576,7 @@ def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=No
         if len(pos) <= 1 or len(neg) <= 1:
             empty_rows.append(i)
     # don't modify the original annotation matrix to keep the rows matching the GO ids
-    curr_ann_mat = alg_utils.delete_rows_csr(ann_matrix.tocsr(), empty_rows)
+    curr_ann_mat = delete_rows_csr(ann_matrix.tocsr(), empty_rows)
 
     # normalize the networks
     print("Normalizing the networks")
@@ -594,6 +616,19 @@ def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=No
             out.write(''.join("%s\t%s\n" % (net_names[idx], str(alpha[i])) for i, idx in enumerate(indices)))
 
     return combined_network, total_time
+
+
+# copied from here: https://stackoverflow.com/a/26504995
+def delete_rows_csr(mat, indices):
+    """ 
+    Remove the rows denoted by ``indices`` form the CSR sparse matrix ``mat``.
+    """
+    if not isinstance(mat, sparse.csr_matrix):
+        raise ValueError("works only for CSR format -- use .tocsr() first")
+    indices = list(indices)
+    mask = np.ones(mat.shape[0], dtype=bool)
+    mask[indices] = False
+    return mat[mask]
 
 
 # this was mostly copied from the deepNF preprocessing script

@@ -24,6 +24,7 @@ full_column_names["textmining_transferred"]  = 15
 full_column_names["combined_score"]          = 16
 
 # the three different sets of STRING networks considered
+# everything except for the 'combined_score'
 STRING_NETWORKS = list(full_column_names.keys())[2:-1]
 NON_TRANSFERRED_STRING_NETWORKS = [net for net in STRING_NETWORKS if 'transferred' not in net]
 CORE_STRING_NETWORKS = ["neighborhood", "fusion", "cooccurence", "coexpression", "experiments", "database"]
@@ -36,14 +37,14 @@ STRING_NAME_MAPPING = {
     }
 
 
-def convert_string_naming_scheme(string_nets):
+def convert_string_naming_scheme(string_nets_str):
     """
     Converts a comma-separated list of string mapping schemes (and possibly string networks)
         into a set of string networks.
     For exapmle: "core,textmining" would be converted to ['neighborhood', 'fusion', ..., 'textmining']
     """
     string_nets = set()
-    for name in string_nets.split(','):
+    for name in string_nets_str.split(','):
         if name in STRING_NAME_MAPPING:
             string_nets.update(set(STRING_NAME_MAPPING[name]))
         else:
