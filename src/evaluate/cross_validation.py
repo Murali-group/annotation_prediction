@@ -64,7 +64,7 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, **kwargs):
         eval_utils.evaluate_ground_truth(
             combined_fold_scores, ann_obj, out_file,
             #non_pos_as_neg_eval=opts.non_pos_as_neg_eval,
-            alg=run_obj.name, **kwargs)
+            alg=run_obj.name, append=False, **kwargs)
 
     print("Finished running cross-validation")
     return
