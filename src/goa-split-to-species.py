@@ -110,7 +110,8 @@ def main(args):
             #aspect = line[8]
             #if aspect != 'P':
             #    continue
-            curr_taxon = cols[12].split(':')[-1]
+            # if multiple taxon are present, the first one is of this entry 
+            curr_taxon = cols[12].split('|')[0].split(':')[-1]
 
             if selected_strains is not None and curr_taxon not in selected_strains:
                 #print "Skipping taxon %s" % (curr_taxon)
