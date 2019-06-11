@@ -6,8 +6,7 @@ import numpy as np
 from collections import defaultdict
 import time
 from tqdm import tqdm
-sys.path.append("src")
-import utils.file_utils as utils
+import src.utils.file_utils as utils
 
 
 ALGORITHMS = [
