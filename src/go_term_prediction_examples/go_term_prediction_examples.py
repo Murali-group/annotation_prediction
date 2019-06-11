@@ -240,6 +240,15 @@ def parse_gaf_file(gaf_file, pos_neg_ec=[], rem_neg_ec=[], ignore_ec=[]):
                 num_not_uniprot += 1
                 continue
             prot = cols[1]
+            # UPDATE 2019-06-11: Some annotations are to specific peptides of UniProt IDs
+            # For example: A0A219CMY0:PRO_0000443731
+            # For now, just take the UniProt ID of the annotation
+            if ':' in prot:
+                prot = prot.split(':')[0]
+            # also remove splice variants if they're specified
+            # for example: O00499-7
+            if '-' in prot:
+                prot = prot.split('-')[0]
             all_prots.add(prot)
             goid = cols[4]
             evidence_code = cols[6]
