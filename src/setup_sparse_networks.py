@@ -269,7 +269,7 @@ def create_sparse_net_file(
     # the node IDs should be the same for each of the networks,
     # so no need to include the # in the ids file
     node_ids_file = "%snode-ids.txt" % (out_pref)
-    net_names_file = "%s%d-net-names.txt" % (out_pref, num_networks)
+    net_names_file = "%s%s-net-names.txt" % (out_pref, num_networks)
     if forcenet is False \
        and os.path.isfile(sparse_nets_file) and os.path.isfile(node_ids_file) \
        and os.path.isfile(net_names_file):
