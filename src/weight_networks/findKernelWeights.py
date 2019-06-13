@@ -24,8 +24,9 @@ def findKernelWeights(y, W):
 
     # a few checks on the arguments
     if num_pos == 0 or num_neg == 0:
-        print("ERROR: 0 positive and/or 0 negative examples")
-        return
+        print("WARNING: 0 positive and/or 0 negative examples")
+        print("\tUsing average kernel")
+        return return_avg(num_networks)
 
     num_unk = len(np.where(y == 0)[0])
     if num_pos + num_neg + num_unk != len(y):
@@ -133,10 +134,15 @@ def findKernelWeights(y, W):
                    ', '.join([str(x) for x in alpha])))
 
     if len(indices) == 0:
-        indices = np.arange(num_networks)
-        # use a uniform alpha for all the networks which is the
-        # average of the # of networks
-        alpha = np.asarray([1/float(num_networks)]*num_networks)
         print("\tAll kernels eliminated or empty, using average kernel")
+        return return_avg(num_networks)
 
+    return alpha, indices
+
+
+def return_avg(num_networks):
+    indices = np.arange(num_networks)
+    # use a uniform alpha for all the networks which is the
+    # average of the # of networks
+    alpha = np.asarray([1/float(num_networks)]*num_networks)
     return alpha, indices

@@ -62,7 +62,7 @@ def run(run_obj):
     for i in trange(run_obj.ann_matrix.shape[0]):
         goid = run_obj.goids[i]
         # get the row corresponding to the current goids annotations 
-        y = run_obj.ann_matrix[i,:]
+        y = run_obj.ann_matrix[i,:].toarray()[0]
 
         if run_obj.net_obj.weight_gm2008 is True:
             start_time = time.process_time()

@@ -74,7 +74,7 @@ def run(run_obj):
         if run_obj.net_obj.weight_gm2008 is True:
             start_time = time.process_time()
             # weight the network for each GO term individually
-            W, process_time = run_obj.net_obj.weight_GM2008(y, goid)
+            W, process_time = run_obj.net_obj.weight_GM2008(y.toarray()[0], goid)
             P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=params.get('lambda', None))
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 

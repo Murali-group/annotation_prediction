@@ -543,12 +543,12 @@ def weight_GM2008(y, normalized_nets, net_names=None, goid=None):
     """
     start_time = time.process_time()
     if goid is not None:
-        print("\tgoid %s: %d positives, %d negatives" % (goid, len(np.where(y > 0)[0]), len(np.where(y < 0)[0])))
+        print("\tgoid %s: %d positives, %d negatives" % (goid, len(np.where(y == 1)[0]), len(np.where(y == -1)[0])))
     alphas, indices = findKernelWeights(y, normalized_nets)
     if net_names is not None:
         print("\tnetwork weights: %s\n" % (', '.join(
             "%s: %s" % (net_names[x], alphas[i]) for
-             i, x in enumerate(indices))))
+            i, x in enumerate(indices))))
 
     # now add the networks together with the alpha weight applied
     combined_network = alphas[0]*normalized_nets[indices[0]]
