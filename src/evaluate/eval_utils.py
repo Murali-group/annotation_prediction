@@ -71,7 +71,7 @@ def evaluate_ground_truth(
         if not os.path.isfile(out_file) or not append:
             print("Writing results to %s" % (out_file))
             with open(out_file, 'w') as out:
-                if taxon == '-':
+                if taxon in ['-', None]:
                     out.write("#goid\tfmax\tavgp\tauprc\tauroc\t# ann\n")
                 else:
                     out.write("#taxon\tgoid\tfmax\tavgp\tauprc\tauroc\t# test ann\n")
@@ -86,7 +86,8 @@ def evaluate_ground_truth(
     if write_prec_rec:
         goid = list(goid_prec_rec.keys())[0]
         out_file_pr = out_file.replace('.txt', "prec-rec%s%s.txt" % (
-            taxon, '-%s'%(goid) if len(goid_prec_rec) == 1 else ""))
+            taxon if taxon not in ['-', None] else '',
+            '-%s'%(goid) if len(goid_prec_rec) == 1 else ""))
         print("writing prec/rec to %s" % (out_file_pr))
         with open(out_file_pr, 'w') as out:
             out.write("goid\tprec\trec\tnode\tscore\tidxpos/neg\n")
