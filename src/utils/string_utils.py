@@ -43,10 +43,14 @@ def convert_string_naming_scheme(string_nets_str):
         into a set of string networks.
     For exapmle: "core,textmining" would be converted to ['neighborhood', 'fusion', ..., 'textmining']
     """
-    string_nets = set()
+    # TODO I could use an ordered set/dict
+    string_nets = []
     for name in string_nets_str.split(','):
         if name in STRING_NAME_MAPPING:
-            string_nets.update(set(STRING_NAME_MAPPING[name]))
+            for n in STRING_NAME_MAPPING[name]:
+                if n not in string_nets:
+                    string_nets.append(n)
         else:
-            string_nets.add(name)
+            if name not in string_nets:
+                string_nets.append(name)
     return string_nets

@@ -261,6 +261,7 @@ def create_sparse_net_file(
     # if there are string_net_files, and string_nets is None, set it back to its default
     elif string_nets is None:
         string_nets = STRING_NETWORKS
+    string_nets = list(string_nets)
     num_networks = len(net_files) + len(string_nets)
     # if there is only 1 string network, then write the name instead of the number
     if num_networks == 1 and len(string_nets) == 1:
