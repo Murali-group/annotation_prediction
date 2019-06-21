@@ -109,8 +109,10 @@ def runLocal(P, positives, negatives=None):
     if negatives is not None:
         f[negatives] = -1
 
+    start_wall_time = time.time()
     start_process_time = time.process_time()
     s = csr_matrix.dot(P, f)
+    wall_time = time.time() - start_wall_time
     process_time = time.process_time() - start_process_time
 
-    return s, process_time
+    return s, process_time, wall_time

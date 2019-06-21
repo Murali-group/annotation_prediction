@@ -31,11 +31,13 @@ def setupInputs(run_obj):
 
 
 # setup the params_str used in the output file
-def setup_params_str(run_obj):
-    params = run_obj.params
+def setup_params_str(weight_str, params, name="fastsinksource"):
+    if name.lower() in ["local", "localplus"]:
+        return ""
+        #return weight_str
     a, eps, maxi = params['alpha'], params['eps'], params['max_iters']
-    params_str = "-%sa%s-eps%s-maxi%s" % (
-        run_obj.weight_str, str_(a), str_(eps), str_(maxi))
+    params_str = "%s-a%s-eps%s-maxi%s" % (
+        weight_str, str_(a), str_(eps), str_(maxi))
     return params_str
 
 
@@ -58,7 +60,6 @@ def run(run_obj):
 
     alg = run_obj.name
     params = run_obj.params
-    a, eps, max_iters = params['alpha'], float(params['eps']), params['max_iters']
 
     # run FastSinkSource on each GO term individually
     for i in trange(run_obj.ann_matrix.shape[0]):
@@ -68,7 +69,7 @@ def run(run_obj):
         positives = (y > 0).nonzero()[1]
         negatives = (y < 0).nonzero()[1]
         # if this method uses positive examples only, then remove the negative examples
-        if alg in ["fastsinksourceplus", "localplus"]:
+        if alg in ["fastsinksourceplus", "sinksourceplus", "localplus"]:
             negatives = None
 
         if run_obj.net_obj.weight_gm2008 is True:
@@ -79,12 +80,13 @@ def run(run_obj):
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 
         # now actually run the algorithm
-        if alg in ["fastsinksource", "fastsinksourceplus"]:
+        if alg in ["fastsinksource", "fastsinksourceplus", "sinksource", "sinksourceplus"]:
+            a, eps, max_iters = params['alpha'], float(params['eps']), params['max_iters']
             scores, process_time, wall_time, iters = fastsinksource.runFastSinkSource(
                 P, positives, negatives=negatives, max_iters=max_iters,
                 eps=eps, a=a, verbose=run_obj.kwargs.get('verbose', False))
         elif alg in ["local", "localplus"]:
-            scores, process_time = fastsinksource.runLocal(
+            scores, process_time, wall_time = fastsinksource.runLocal(
                 P, positives, negatives=negatives)
             iters = 1
 
