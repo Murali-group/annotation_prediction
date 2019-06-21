@@ -79,7 +79,7 @@ def evaluate_ground_truth(
             print("Appending results to %s" % (out_file))
         with open(out_file, 'a') as out:
             out.write(''.join(["%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d\n" % (
-                "%s\t"%taxon if taxon != "-" else "",
+                "%s\t"%taxon if taxon not in ["-", None] else "",
                 g, fmax, avgp, auprc, auroc, goid_num_pos[g]
                 ) for g, (fmax, avgp, auprc, auroc) in goid_stats.items()]))
 

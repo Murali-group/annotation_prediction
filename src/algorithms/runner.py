@@ -14,7 +14,12 @@ from scipy import sparse
 
 
 LibMapper = {
+    'sinksource': fastsinksource,
+    'sinksourceplus': fastsinksource,
     'fastsinksource': fastsinksource,
+    'fastsinksourceplus': fastsinksource,
+    'local': fastsinksource,
+    'localplus': fastsinksource,
     'genemania': genemania,
     'aptrank': birgrank,
     'birgrank': birgrank,
@@ -53,11 +58,7 @@ class Runner(object):
         self.goid_scores = sparse.lil_matrix(ann_obj.ann_matrix.shape, dtype=np.float)
 
         # keep track of the weighting method for writing to the output file later
-        self.weight_str = '%s%s%s' % (
-            'unw-' if net_obj.unweighted else '', 
-            'gm2008-' if net_obj.weight_gm2008 else '',
-            'swsn-' if net_obj.weight_swsn else '')
-        self.setupParamsStr()
+        self.setupParamsStr(net_obj.weight_str, params, name)
 
     # if the method is not in Python and needs to be called elsewhere, use this
     def setupInputs(self):
@@ -73,6 +74,21 @@ class Runner(object):
         LibMapper[self.name].setupOutputs(self)
 
     # setup the params_str used in the output file
-    def setupParamsStr(self):
-        self.params_str = LibMapper[self.name].setup_params_str(self)
+    def setupParamsStr(self, weight_str, params, name):
+        self.params_str = LibMapper[self.name].setup_params_str(weight_str, params, name)
+
+
+def get_runner_params_str(name, dataset, params):
+    """
+    Get the params string for a runner without actually creating the runner object
+    """
+    # get the weight str used when writing output files
+    unweighted = dataset['net_settings'].get('unweighted', False) if 'net_settings' in dataset else False
+    weight_method = ""
+    if dataset.get('multi_net',False) is True: 
+        weight_method = "-"+dataset['net_settings']['weight_method']
+    weight_str = '%s%s' % (
+        '-unw' if unweighted else '', weight_method)
+
+    return LibMapper[name].setup_params_str(weight_str, params, name=name)
 

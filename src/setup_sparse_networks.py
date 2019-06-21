@@ -25,9 +25,15 @@ class Sparse_Networks:
     """
     An object to hold the sparse network (or sparse networks if they are to be joined later), 
         the list of nodes giving the index of each node, and a mapping from node name to index
+    *sparse_networks*: either a list of scipy sparse matrices, or a single sparse matrix
+    *weight_method*: method to combine the networks if multiple sparse networks are given.
+        Possible values: 'swsn', or 'gmw'
+        'swsn': Simultaneous Weighting with Specific Negatives (all terms)
+        'gmw': GeneMANIA Weighting (term-by-term). Also called gm2008
+    *unweighted*: set the edge weights to 1 for all given networks.
     """
     def __init__(self, sparse_networks, nodes, net_names=None,
-                 weight_swsn=False, weight_gm2008=False, unweighted=False):
+                 weight_method='swsn', unweighted=False):
         if isinstance(sparse_networks, list):
             self.sparse_networks = sparse_networks
             self.multi_net = True
@@ -38,9 +44,23 @@ class Sparse_Networks:
         # used to map from node/prot to the index and vice versa
         self.node2idx = {n: i for i, n in enumerate(nodes)}
         self.net_names = net_names
-        self.weight_swsn = weight_swsn
-        self.weight_gm2008 = weight_gm2008
         self.unweighted = unweighted
+        # make sure the values are correct
+        if self.multi_net is True:
+            self.weight_swsn = True if weight_method.lower() == 'swsn' else False
+            self.weight_gm2008 = True if weight_method.lower() in ['gmw', 'gm2008'] else False
+            num_weight_methods = sum([self.weight_swsn, self.weight_gm2008])
+            if num_weight_methods == 0 or num_weight_methods > 1:
+                raise("must specify exactly one method to combine networks when multiple networks are passed in. Given method: '%s'" % (weight_method))
+        else:
+            self.weight_swsn = False
+            self.weight_gm2008 = False
+
+        # set a weight str for writing output files
+        self.weight_str = '%s%s%s' % (
+            '-unw' if self.unweighted else '', 
+            '-gm2008' if self.weight_gm2008 else '',
+            '-swsn' if self.weight_swsn else '')
 
         if self.unweighted is True:
             print("\tsetting all edge weights to 1 (unweighted)")
@@ -303,7 +323,9 @@ def write_sparse_net_file(
     print("\twriting sparse networks to %s" % (out_file))
     mat_networks = np.zeros(len(sparse_networks), dtype=np.object)
     for i, net in enumerate(network_names):
-        mat_networks[i] = sparse_networks[i]
+        # convert to float otherwise matlab won't parse it correctly
+        # see here: https://github.com/scipy/scipy/issues/5028
+        mat_networks[i] = sparse_networks[i].astype(float)
     savemat(out_file, {"Networks":mat_networks}, do_compression=True)
 
     print("\twriting node2idx labels to %s" % (node_ids_file))
@@ -385,20 +407,26 @@ def setup_sparse_networks(net_files=[], string_net_files=[], string_nets=[], str
 
     print("\tconverting graph to sparse matrices")
     sparse_networks = []
+    net_names = []
     for i, net in enumerate(tqdm(network_names)):
         # all of the edges that don't have a weight for the specified network will be given a weight of 1
         # get a subnetwork with the edges that have a weight for this network
         print("\tgetting subnetwork for '%s'" % (net))
         netG = nx.Graph()
         netG.add_weighted_edges_from([(u,v,w) for u,v,w in G.edges(data=net) if w is not None])
+        # skip this network if it has no edges, or leave it empty(?)
+        if netG.number_of_edges() == 0:
+            print("\t0 edges. skipping.")
+            continue
         # now convert it to a sparse matrix. The nodelist will make sure they're all the same dimensions
         sparse_matrix = nx.to_scipy_sparse_matrix(netG, nodelist=sorted(idx2node))
         # convert to float otherwise matlab won't parse it correctly
         # see here: https://github.com/scipy/scipy/issues/5028
         sparse_matrix = sparse_matrix.astype(float) 
         sparse_networks.append(sparse_matrix)
+        net_names.append(net) 
 
-    return sparse_networks, network_names, nodes
+    return sparse_networks, net_names, nodes
 
 
 def convert_nodes_to_int(G):

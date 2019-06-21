@@ -112,6 +112,7 @@ def setup_net(input_dir, dataset, **kwargs):
             net_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_file'])
         else:
             net_file = dataset['net_file']
+    unweighted = dataset['net_settings'].get('unweighted', False) if 'net_settings' in dataset else False
     if dataset.get('multi_net',False) is True: 
         # if multiple file names are passed in, then map each one of them
         if isinstance(net_file, list) or 'string_net_files' in dataset:
@@ -137,15 +138,11 @@ def setup_net(input_dir, dataset, **kwargs):
         weight_method = dataset['net_settings']['weight_method'].lower()
         net_obj = setup.Sparse_Networks(
             sparse_nets, prots, net_names=net_names,
-            weight_swsn=True if weight_method == 'swsn' else False,
-            weight_gm2008=True if weight_method in ['gmw', 'gm2008'] else False,
-            unweighted=True if weight_method == 'unweighted' else False,
+            weight_method=weight_method, unweighted=unweighted,
         )
     else:
         W, prots = alg_utils.setup_sparse_network(net_file, forced=kwargs['forcenet'])
-        weight_method = dataset['net_settings']['weight_method'].lower() if 'net_settings' in dataset else None
-        net_obj = setup.Sparse_Networks(W, prots, 
-            unweighted=True if weight_method == 'unweighted' else False)
+        net_obj = setup.Sparse_Networks(W, prots, unweighted=unweighted)
     return net_obj
 
 
@@ -237,6 +234,8 @@ def run_algs(alg_runners, **kwargs):
                 num_pred_to_write[run_obj.goids[i]] = len(positives) * kwargs['factor_pred_to_write']
         if num_pred_to_write != 0:
             out_file = "%s/pred%s.txt" % (run_obj.out_dir, run_obj.params_str)
+            # TODO generate the output file paths in the runner object
+            #out_file = run_obj.out_file
             utils.checkDir(os.path.dirname(out_file)) 
             write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
                          out_file, num_pred_to_write=num_pred_to_write)

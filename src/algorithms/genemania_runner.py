@@ -30,16 +30,13 @@ def setupInputs(run_obj):
     else:
         run_obj.L = genemania.setup_laplacian(run_obj.net_obj.W)
 
-    # also setup the output folder/file
-    run_obj.params_str = setup_params_str(run_obj.params, run_obj.weight_str)
-        
     return
 
 
 # setup the params_str used in the output file
-def setup_params_str(run_obj):
-    params_str = "-%stol%s" % (
-        run_obj.weight_str, str(run_obj.params['tol']).replace('.','_'))
+def setup_params_str(weight_str, params, name='genemania'):
+    params_str = "%s-tol%s" % (
+        weight_str, str(params['tol']).replace('.','_'))
     return params_str
 
 
