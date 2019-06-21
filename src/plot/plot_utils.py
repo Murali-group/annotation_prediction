@@ -48,18 +48,52 @@ def main(config_map, **kwargs):
     output_settings = config_map['output_settings']
     # get the path to the specified files for each alg
     df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
+    algs = df_all['Algorithm'].unique()
 
-    print("\t%d algorithms, %d plot_exp_name values\n" % (len(df_all['Algorithm'].unique()), len(df_all['plot_exp_name'].unique())))
+    print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
     #print(df_all.head())
     results_overview(df_all, measures=kwargs['measures'])
+
+    # TODO currently only handles one dataset
+    title = df_all['plot_exp_name'].unique()[0]
 
     # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
     for measure in kwargs['measures']:
         if kwargs['boxplot']:
-            plot_boxplot(df_all, measure=measure, **kwargs)
+            plot_boxplot(df_all, measure=measure, title=title, **kwargs)
+        if kwargs['scatter']:
+            plot_scatter(df_all, measure=measure, title=title, **kwargs) 
 
 
-def plot_boxplot(df, measure='fmax', out_pref="test", ax=None, **kwargs):
+def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
+    algs = df['Algorithm'].unique()
+    df2 = df[['fmax', 'Algorithm']]
+    df2 = df2.pivot(columns='Algorithm')
+    df2.columns = [' '.join(col).strip() for col in df2.columns.values]
+    # if there are only two algorithms, make a joint plot
+    if len(algs) == 2:
+        g = sns.jointplot(df2.columns[0], df2.columns[1], data=df2, xlim=(-0.02,1.02), ylim=(-0.02,1.02))
+        # also plot x=y
+        g.ax_joint.plot((0,1),(0,1))
+    # if there are more, a pairplot
+    else:
+        g = sns.pairplot(data=df2)
+        g.set(xlim=(-0.02,1.02), ylim=(-0.02,1.02))
+        # draw the x=y lines
+        for i in range(len(algs)):
+            for j in range(len(algs)):
+                if i != j:
+                    g.axes[i][j].plot((0,1),(0,1))
+
+    plt.title(title)
+
+    if out_pref is not None:
+        out_file = "%s-%s-scatter.pdf" % (out_pref, measure)
+        print("Writing %s" % (out_file))
+        plt.savefig(out_file, bbox_inches='tight')
+
+
+def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
     sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
                fliersize=1.5, #order=[kwargs['alg_names'][a] for a in algorithms],
                #palette=plt_utils.my_palette)
@@ -71,6 +105,7 @@ def plot_boxplot(df, measure='fmax', out_pref="test", ax=None, **kwargs):
         xlabel = measure_map[measure]
     plt.xlabel(xlabel)
     plt.ylabel("")
+    plt.title(title)
 
     if out_pref is not None:
         out_file = "%s-%s-boxplot.pdf" % (out_pref, measure)
@@ -98,11 +133,17 @@ def load_all_results(input_settings, alg_settings, output_settings, **kwargs):
     """
     df_all = pd.DataFrame()
     for dataset in input_settings['datasets']:
-        for alg in alg_settings:
+        if kwargs['algs'] is not None:
+            algs = kwargs['algs']
+        else:
+            algs = alg_settings.keys()
+        for alg in algs:
             # TODO use should_run?
             alg_params = alg_settings[alg]
-            if alg_params.get('should_run', [False])[0] is False:
-                continue
+            # If no algs were passed in, then use the 'should_run' value
+            if kwargs['algs'] is None:
+                if alg_params.get('should_run', [False])[0] is False:
+                    continue
             df = load_alg_results(
                 dataset, alg, alg_params, results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'])
             # also add the net version and exp_name
@@ -111,7 +152,7 @@ def load_all_results(input_settings, alg_settings, output_settings, **kwargs):
             if 'net_settings' in dataset and 'weight_method' in dataset['net_settings']:
                 df['weight_method'] = dataset['net_settings']['weight_method'] 
             # if they specified a name to use in the plot for this experiment, then use that
-            plot_exp_name = "%s-%s" % (dataset['net_version'], dataset['exp_name'])
+            plot_exp_name = "%s %s" % (dataset['net_version'], dataset['exp_name'])
             if 'plot_exp_name' in dataset:
                 plot_exp_name = dataset['plot_exp_name']
             df['plot_exp_name'] = plot_exp_name
@@ -172,6 +213,10 @@ def parse_args(args):
         kwargs['measure'] = ['fmax']
     kwargs['measures'] = kwargs['measure']
     del kwargs['measure']
+    if kwargs['alg'] is None:
+        kwargs['alg'] = ['fmax']
+    kwargs['algs'] = kwargs['alg']
+    del kwargs['alg']
 
     return config_map, kwargs
 
@@ -185,6 +230,10 @@ def setup_opts():
     group = OptionGroup(parser, 'Main Options')
     group.add_option('','--config', type='string', default="config-files/config.yaml",
                      help="Configuration file")
+    group.add_option('-A', '--alg', type='string', action="append",
+                     help="Algorithms to plot. Must be in the config file. If specified, will ignore 'should_run' in the config file")
+    group.add_option('-o', '--out-pref', type='string', default="test",
+                     help="Output prefix for writing plot to file. Default: test")
     group.add_option('-G', '--goterm', type='string', action="append",
                      help="Specify the GO terms to use (should be in GO:00XX format)")
     group.add_option('', '--forceplot', action='store_true', default=False,
