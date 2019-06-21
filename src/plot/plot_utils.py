@@ -137,6 +137,7 @@ def load_all_results(input_settings, alg_settings, output_settings, **kwargs):
             algs = kwargs['algs']
         else:
             algs = alg_settings.keys()
+            print(algs)
         for alg in algs:
             # TODO use should_run?
             alg_params = alg_settings[alg]
@@ -213,8 +214,6 @@ def parse_args(args):
         kwargs['measure'] = ['fmax']
     kwargs['measures'] = kwargs['measure']
     del kwargs['measure']
-    if kwargs['alg'] is None:
-        kwargs['alg'] = ['fmax']
     kwargs['algs'] = kwargs['alg']
     del kwargs['alg']
 
