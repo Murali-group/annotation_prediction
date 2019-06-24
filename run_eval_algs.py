@@ -71,6 +71,10 @@ def setup_opts():
                      help="Perform cross validation using the specified # of folds. Usually 5")
     group.add_option('', '--nrep', type='int', default=1,
                      help="Number of times to repeat the CV process. Default=1")
+    group.add_option('', '--write-prec-rec', action="store_true", default=False,
+                     help="Also write a file containing the precision and recall for every positive example. " + \
+                             "If a single term is given, only the prec-rec file, with the term in its name, will be written."
+                     )
     # TODO finish adding this option
     #group.add_option('-T', '--ground-truth-file', type='string',
     #                 help="File containing true annotations with which to evaluate predictions")

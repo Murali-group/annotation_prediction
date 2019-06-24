@@ -66,8 +66,10 @@ def evaluate_ground_truth(
         if kwargs['verbose']:
             print("%s fmax: %0.4f" % (goid, fmax))
 
-    if not write_prec_rec:
-        # don't write the header each time
+    if write_prec_rec and len(goid_prec_rec) == 1:
+        print("skipping writing %s" % (out_file))
+    else:
+        # don't re-write the header if this file is being appended to
         if not os.path.isfile(out_file) or not append:
             print("Writing results to %s" % (out_file))
             with open(out_file, 'w') as out:
@@ -90,7 +92,7 @@ def evaluate_ground_truth(
             '-%s'%(goid) if len(goid_prec_rec) == 1 else ""))
         print("writing prec/rec to %s" % (out_file_pr))
         with open(out_file_pr, 'w') as out:
-            out.write("goid\tprec\trec\tnode\tscore\tidxpos/neg\n")
+            out.write("#goid\tprec\trec\tnode\tscore\tidxpos/neg\n")
             for goid, (prec, rec, pos_neg_stats) in goid_prec_rec.items():
                 out.write(''.join(["%s\t%0.4f\t%0.4f\t%s\t%0.4f\t%d\t%d\n" % (
                     goid, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg) in zip(prec[1:], rec[1:], pos_neg_stats)]))
