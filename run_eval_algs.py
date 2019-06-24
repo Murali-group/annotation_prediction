@@ -56,7 +56,7 @@ def setup_opts():
     group.add_option('','--config', type='string', default="config-files/config.yaml",
                      help="Configuration file")
     group.add_option('-G', '--goterm', type='string', action="append",
-                     help="Specify the GO terms to use (should be in GO:00XX format)")
+                     help="Specify the GO terms to use. Can use this option multiple times")
     parser.add_option_group(group)
 
     # additional parameters
@@ -69,12 +69,11 @@ def setup_opts():
                      help="Perform cross-validation only")
     group.add_option('-C', '--cross-validation-folds', type='int',
                      help="Perform cross validation using the specified # of folds. Usually 5")
-    group.add_option('', '--nrep', type='int', default=1,
+    group.add_option('', '--num-reps', type='int', default=1,
                      help="Number of times to repeat the CV process. Default=1")
     group.add_option('', '--write-prec-rec', action="store_true", default=False,
                      help="Also write a file containing the precision and recall for every positive example. " + \
-                             "If a single term is given, only the prec-rec file, with the term in its name, will be written."
-                     )
+                          "If a single term is given, only the prec-rec file, with the term in its name, will be written.")
     # TODO finish adding this option
     #group.add_option('-T', '--ground-truth-file', type='string',
     #                 help="File containing true annotations with which to evaluate predictions")

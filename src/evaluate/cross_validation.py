@@ -14,13 +14,13 @@ except ImportError:
     pass
 
 
-def run_cv_all_goterms(alg_runners, ann_obj, folds=5, nrep=1, **kwargs):
+def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, **kwargs):
     """
     Split the positives and negatives into folds across all GO terms
     and then run the algorithms on those folds.
     Algorithms are all run on the same split of data. 
     TODO allow specifying CV the seed
-    *nrep*: Number of times to repeat cross-validation. 
+    *num_reps*: Number of times to repeat cross-validation. 
     An output file will be written for each repeat
     """
     ann_matrix = ann_obj.ann_matrix
@@ -30,10 +30,10 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, nrep=1, **kwargs):
     # and if the results should be overwritten
     if kwargs['forcealg'] is True:
         # runners_to_run is a list of runners for each repitition
-        runners_to_run = {i: alg_runners for i in range(1,nrep+1)}
+        runners_to_run = {i: alg_runners for i in range(1,num_reps+1)}
     else:
         runners_to_run = {}
-        for rep in range(1,nrep+1):
+        for rep in range(1,num_reps+1):
             curr_runners_to_run = [] 
             for run_obj in alg_runners:
                 out_file = "%s/cv-%dfolds-rep%d%s.txt" % (run_obj.out_dir, folds, rep, run_obj.params_str)
@@ -44,7 +44,7 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, nrep=1, **kwargs):
             runners_to_run[rep] = curr_runners_to_run
 
     # repeat the CV process the specified number of times
-    for rep in range(1,nrep+1):
+    for rep in range(1,num_reps+1):
         if len(runners_to_run[rep]) == 0:
             continue
         ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, **kwargs)
