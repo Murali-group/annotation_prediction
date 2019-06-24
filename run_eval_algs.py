@@ -69,6 +69,8 @@ def setup_opts():
                      help="Perform cross-validation only")
     group.add_option('-C', '--cross-validation-folds', type='int',
                      help="Perform cross validation using the specified # of folds. Usually 5")
+    group.add_option('', '--nrep', type='int', default=1,
+                     help="Number of times to repeat the CV process. Default=1")
     # TODO finish adding this option
     #group.add_option('-T', '--ground-truth-file', type='string',
     #                 help="File containing true annotations with which to evaluate predictions")
@@ -208,19 +210,32 @@ def run_algs(alg_runners, **kwargs):
     Runs all of the specified algorithms with the given network and annotations.
     Each runner should return the GO term prediction scores for each node in a sparse matrix.
     """
+    # first check to see if the algorithms have already been run
+    # and if the results should be overwritten
+    if kwargs['forcealg'] is True or num_pred_to_write == 0:
+        runners_to_run = alg_runners
+    else:
+        runners_to_run = []
+        for run_obj in alg_runners:
+            out_file = "%s/pred%s.txt" % (run_obj.out_dir, run_obj.params_str)
+            if os.path.isfile(out_file):
+                print("%s already exists. Use --forcealg to overwite" % (out_file))
+            else:
+                runners_to_run.append(run_obj)
+
     print("Generating inputs")
     # now setup the inputs for the runners
-    for run_obj in alg_runners:
+    for run_obj in runners_to_run:
         run_obj.setupInputs()
 
     print("Running the algorithms")
     # run the algs
     # TODO storing all of the runners scores simultaneously could be costly (too much RAM).
-    for run_obj in alg_runners:
+    for run_obj in runners_to_run:
         run_obj.run()
 
     # parse the outputs. Only needed for the algs that write output files
-    for run_obj in alg_runners:
+    for run_obj in runners_to_run:
         run_obj.setupOutputs()
 
         # write to file if specified

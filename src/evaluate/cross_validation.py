@@ -14,57 +14,78 @@ except ImportError:
     pass
 
 
-def run_cv_all_goterms(alg_runners, ann_obj, folds=5, **kwargs):
+def run_cv_all_goterms(alg_runners, ann_obj, folds=5, nrep=1, **kwargs):
     """
     Split the positives and negatives into folds across all GO terms
     and then run the algorithms on those folds.
-    For now, only setup to run BirgRank. TODO allow running each algorithm on the same split of data. 
+    Algorithms are all run on the same split of data. 
+    TODO allow specifying CV the seed
+    *nrep*: Number of times to repeat cross-validation. 
+    An output file will be written for each repeat
     """
     ann_matrix = ann_obj.ann_matrix
     goids, prots = ann_obj.goids, ann_obj.prots
 
-    ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, **kwargs)
+    # first check to see if the algorithms have already been run
+    # and if the results should be overwritten
+    if kwargs['forcealg'] is True:
+        # runners_to_run is a list of runners for each repitition
+        runners_to_run = {i: alg_runners for i in range(1,nrep+1)}
+    else:
+        runners_to_run = {}
+        for rep in range(1,nrep+1):
+            curr_runners_to_run = [] 
+            for run_obj in alg_runners:
+                out_file = "%s/cv-%dfolds-rep%d%s.txt" % (run_obj.out_dir, folds, rep, run_obj.params_str)
+                if os.path.isfile(out_file):
+                    print("%s already exists. Use --forcealg to overwite" % (out_file))
+                else:
+                    curr_runners_to_run.append(run_obj)
+            runners_to_run[rep] = curr_runners_to_run
 
-    for run_obj in alg_runners:
-        # because each fold contains a different set of positives, and combined they contain all positives,
-        # store all of the prediction scores from each fold in a matrix
-        combined_fold_scores = sparse.lil_matrix(ann_matrix.shape, dtype=np.float)
-        #out_pref = "%s/cv-%dfolds-swsn-%sl%d-" % (out_dir, cross_validation_folds,
-        #        'unw-' if unweighted else '', 0 if ss_lambda is None else int(ss_lambda))
-        #utils.checkDir(os.path.dirname(out_pref))
-        for curr_fold, (train_ann_mat, test_ann_mat) in enumerate(ann_matrix_folds):
-            print("*  "*20)
-            print("Fold %d" % (curr_fold+1))
+    # repeat the CV process the specified number of times
+    for rep in range(1,nrep+1):
+        if len(runners_to_run[rep]) == 0:
+            continue
+        ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, **kwargs)
 
-            # change the annotation matrix to the current fold
-            curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, goids, prots)
-            # replace the ann_obj in the runner with the current fold's annotations  
-            run_obj.ann_obj = curr_ann_obj
-            #alg_runners = run_eval_algs.setup_runners([alg], alg_settings, net_obj, curr_ann_obj, **kwargs)
-            # now setup the inputs for the runners
-            run_obj.setupInputs()
-            # run the alg
-            run_obj.run()
-            # parse the outputs. Only needed for the algs that write output files
-            run_obj.setupOutputs()
+        for run_obj in runners_to_run[rep]:
+            # because each fold contains a different set of positives, and combined they contain all positives,
+            # store all of the prediction scores from each fold in a matrix
+            combined_fold_scores = sparse.lil_matrix(ann_matrix.shape, dtype=np.float)
+            for curr_fold, (train_ann_mat, test_ann_mat) in enumerate(ann_matrix_folds):
+                print("*  "*20)
+                print("Fold %d" % (curr_fold+1))
 
-            # store only the scores of the test (left out) positives and negatives
-            for i in range(len(goids)):
-                test_pos, test_neg = alg_utils.get_goid_pos_neg(test_ann_mat, i)
-                curr_goid_scores = run_obj.goid_scores[i].toarray().flatten()
-                curr_comb_scores = combined_fold_scores[i].toarray().flatten()
-                curr_comb_scores[test_pos] = curr_goid_scores[test_pos]
-                curr_comb_scores[test_neg] = curr_goid_scores[test_neg]
-                combined_fold_scores[i] = curr_comb_scores 
+                # change the annotation matrix to the current fold
+                curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, goids, prots)
+                # replace the ann_obj in the runner with the current fold's annotations  
+                run_obj.ann_obj = curr_ann_obj
+                #alg_runners = run_eval_algs.setup_runners([alg], alg_settings, net_obj, curr_ann_obj, **kwargs)
+                # now setup the inputs for the runners
+                run_obj.setupInputs()
+                # run the alg
+                run_obj.run()
+                # parse the outputs. Only needed for the algs that write output files
+                run_obj.setupOutputs()
 
-        #curr_goids = dag_goids if alg == 'birgrank' else goids
-        # now evaluate the results and write to a file
-        out_file = "%s/cv-%dfolds%s.txt" % (run_obj.out_dir, folds, run_obj.params_str)
-        utils.checkDir(os.path.dirname(out_file)) 
-        eval_utils.evaluate_ground_truth(
-            combined_fold_scores, ann_obj, out_file,
-            #non_pos_as_neg_eval=opts.non_pos_as_neg_eval,
-            alg=run_obj.name, append=False, **kwargs)
+                # store only the scores of the test (left out) positives and negatives
+                for i in range(len(goids)):
+                    test_pos, test_neg = alg_utils.get_goid_pos_neg(test_ann_mat, i)
+                    curr_goid_scores = run_obj.goid_scores[i].toarray().flatten()
+                    curr_comb_scores = combined_fold_scores[i].toarray().flatten()
+                    curr_comb_scores[test_pos] = curr_goid_scores[test_pos]
+                    curr_comb_scores[test_neg] = curr_goid_scores[test_neg]
+                    combined_fold_scores[i] = curr_comb_scores 
+
+            #curr_goids = dag_goids if alg == 'birgrank' else goids
+            # now evaluate the results and write to a file
+            out_file = "%s/cv-%dfolds-rep%d%s.txt" % (run_obj.out_dir, folds, rep, run_obj.params_str)
+            utils.checkDir(os.path.dirname(out_file)) 
+            eval_utils.evaluate_ground_truth(
+                combined_fold_scores, ann_obj, out_file,
+                #non_pos_as_neg_eval=opts.non_pos_as_neg_eval,
+                alg=run_obj.name, append=False, **kwargs)
 
     print("Finished running cross-validation")
     return
