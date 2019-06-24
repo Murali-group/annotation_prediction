@@ -31,6 +31,9 @@ def runGeneMANIA(L, y, tol=1e-05, verbose=False):
     # setup the y vector with the value for the unknowns
     num_pos = len(np.where(y == 1)[0])
     num_neg = len(np.where(y == -1)[0])
+    if num_pos == 0:
+        print("WARNING: No positive examples given. Skipping.")
+        return np.zeros(len(y)), 0,0,0
     # taken from the GeneMANIA paper
     k = (num_pos - num_neg) / float(num_pos + num_neg)
     y[np.where(y == 0)[0]] = k
