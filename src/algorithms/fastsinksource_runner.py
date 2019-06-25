@@ -32,12 +32,14 @@ def setupInputs(run_obj):
 
 # setup the params_str used in the output file
 def setup_params_str(weight_str, params, name="fastsinksource"):
-    if name.lower() in ["local", "localplus"]:
-        return ""
-        #return weight_str
-    a, eps, maxi = params['alpha'], params['eps'], params['max_iters']
-    params_str = "%s-a%s-eps%s-maxi%s" % (
-        weight_str, str_(a), str_(eps), str_(maxi))
+    # ss_lambda affects the network that all these methods use
+    ss_lambda = params.get('lambda', 0)
+    params_str = "%s-l%s" % (weight_str, ss_lambda)
+    if name.lower() not in ["local", "localplus"]:
+        a, eps, maxi = params['alpha'], params['eps'], params['max_iters']
+        params_str += "-a%s-eps%s-maxi%s" % ( 
+            str_(a), str_(eps), str_(maxi))
+
     return params_str
 
 
