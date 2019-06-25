@@ -69,7 +69,7 @@ def setup_opts():
                      help="Number of times to repeat the CV process. Default=1")
     group.add_option('', '--cv-seed', type='int', 
                      help="Seed to use for the random number generator when splitting the annotations into folds. " + \
-                     "If --num-reps > 1, the seed will be incremented by 1 each time")
+                     "If --num-reps > 1, the seed will be incremented by 1 each time. Should only be used for testing purposes")
     group.add_option('', '--write-prec-rec', action="store_true", default=False,
                      help="Also write a file containing the precision and recall for every positive example. " + \
                           "If a single term is given, only the prec-rec file, with the term in its name, will be written.")

@@ -27,6 +27,11 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
     ann_matrix = ann_obj.ann_matrix
     goids, prots = ann_obj.goids, ann_obj.prots
 
+    # set the cv_seed if specified
+    if cv_seed is not None:
+        print("\nSetting the Random State seed to %d" % (cv_seed))
+        np.random.seed(cv_seed)
+
     # first check to see if the algorithms have already been run
     # and if the results should be overwritten
     if kwargs['forcealg'] is True:
@@ -38,7 +43,9 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
         for rep in range(1,num_reps+1):
             curr_runners_to_run = [] 
             for run_obj in alg_runners:
-                out_file = "%s/cv-%dfolds-rep%d%s.txt" % (run_obj.out_dir, folds, rep, run_obj.params_str)
+                out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
+                    run_obj.out_dir, folds, rep,
+                    "-seed%s"%cv_seed if cv_seed is not None else "", run_obj.params_str)
                 if os.path.isfile(out_file):
                     print("%s already exists. Use --forcealg to overwite" % (out_file))
                 else:
@@ -49,12 +56,8 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
     for rep in range(1,num_reps+1):
         if len(runners_to_run[rep]) == 0:
             continue
-        curr_seed = cv_seed
-        if curr_seed is not None:
-            # add the current repitition number to the seed
-            curr_seed += rep-1
         # split the annotation matrix into training and testing matrices K times
-        ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, seed=curr_seed, **kwargs)
+        ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, **kwargs)
 
         for run_obj in runners_to_run[rep]:
             # because each fold contains a different set of positives, and combined they contain all positives,
@@ -89,7 +92,7 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
             # now evaluate the results and write to a file
             out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
                 run_obj.out_dir, folds, rep,
-                "-seed%s"%curr_seed if curr_seed is not None else "", run_obj.params_str)
+                "-seed%s"%cv_seed if cv_seed is not None else "", run_obj.params_str)
             utils.checkDir(os.path.dirname(out_file)) 
             eval_utils.evaluate_ground_truth(
                 combined_fold_scores, ann_obj, out_file,
@@ -100,10 +103,9 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
     return
 
 
-def split_cv_all_goterms(ann_obj, folds=5, seed=None, **kwargs):
+def split_cv_all_goterms(ann_obj, folds=5, **kwargs):
     """
     Split the positives and negatives into folds across all GO terms
-    *seed*: the seed used by the random number generator when generating the folds. If None, the np.random RandomState will be used
     *returns*: a list of tuples containing the (train pos, train neg, test pos, test neg)
     """
     ann_matrix = ann_obj.ann_matrix
@@ -126,14 +128,13 @@ def split_cv_all_goterms(ann_obj, folds=5, seed=None, **kwargs):
             continue
         # print("%d positives, %d negatives for goterm %s" % (len(positives), len(negatives), goid))
         # split the set of positives and the set of negatives into K folds separately
-        kf = KFold(n_splits=folds, shuffle=True, random_state=seed)
-        kf_neg = KFold(n_splits=folds, shuffle=True, random_state=seed)
+        kf = KFold(n_splits=folds, shuffle=True)
         kf.get_n_splits(positives)
-        kf_neg.get_n_splits(negatives)
+        kf.get_n_splits(negatives)
         fold = 0
 
         # now combine the positive and negative sets into a single array, and store it in the corresponding training or testing matrix
-        for (pos_train_idx, pos_test_idx), (neg_train_idx, neg_test_idx) in zip(kf.split(positives), kf_neg.split(negatives)):
+        for (pos_train_idx, pos_test_idx), (neg_train_idx, neg_test_idx) in zip(kf.split(positives), kf.split(negatives)):
             train_pos, test_pos= positives[pos_train_idx], positives[pos_test_idx]
             train_neg, test_neg = negatives[neg_train_idx], negatives[neg_test_idx]
             train_ann_mat, test_ann_mat = ann_matrix_folds[fold]
