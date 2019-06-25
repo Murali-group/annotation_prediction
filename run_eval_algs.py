@@ -59,21 +59,28 @@ def setup_opts():
                      help="Specify the GO terms to use. Can use this option multiple times")
     parser.add_option_group(group)
 
-    # additional parameters
-    group = OptionGroup(parser, 'Additional options')
-    group.add_option('-W', '--num-pred-to-write', type='int', default=10,
-                     help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
-    group.add_option('-N', '--factor-pred-to-write', type='float', 
-                     help="Write the predictions <factor>*num_pos for each term to file. For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
+    # evaluation parameters
+    group = OptionGroup(parser, 'Evaluation options')
     group.add_option('', '--only-cv', action="store_true", default=False,
                      help="Perform cross-validation only")
     group.add_option('-C', '--cross-validation-folds', type='int',
                      help="Perform cross validation using the specified # of folds. Usually 5")
     group.add_option('', '--num-reps', type='int', default=1,
                      help="Number of times to repeat the CV process. Default=1")
+    group.add_option('', '--cv-seed', type='int', 
+                     help="Seed to use for the random number generator when splitting the annotations into folds. " + \
+                     "If --num-reps > 1, the seed will be incremented by 1 each time")
     group.add_option('', '--write-prec-rec', action="store_true", default=False,
                      help="Also write a file containing the precision and recall for every positive example. " + \
                           "If a single term is given, only the prec-rec file, with the term in its name, will be written.")
+    parser.add_option_group(group)
+
+    # additional parameters
+    group = OptionGroup(parser, 'Additional options')
+    group.add_option('-W', '--num-pred-to-write', type='int', default=10,
+                     help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
+    group.add_option('-N', '--factor-pred-to-write', type='float', 
+                     help="Write the predictions <factor>*num_pos for each term to file. For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
     # TODO finish adding this option
     #group.add_option('-T', '--ground-truth-file', type='string',
     #                 help="File containing true annotations with which to evaluate predictions")
@@ -215,7 +222,7 @@ def run_algs(alg_runners, **kwargs):
     """
     # first check to see if the algorithms have already been run
     # and if the results should be overwritten
-    if kwargs['forcealg'] is True or num_pred_to_write == 0:
+    if kwargs['forcealg'] is True or kwargs['num_pred_to_write'] == 0:
         runners_to_run = alg_runners
     else:
         runners_to_run = []
