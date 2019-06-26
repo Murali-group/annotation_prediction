@@ -28,9 +28,10 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
     goids, prots = ann_obj.goids, ann_obj.prots
 
     # set the cv_seed if specified
-    if cv_seed is not None:
-        print("\nSetting the Random State seed to %d" % (cv_seed))
-        np.random.seed(cv_seed)
+    # 2019-06-26 BUG: If there are a different number of terms, or the order of the terms changed, then the results won't be the same
+    #if cv_seed is not None:
+    #    print("\nSetting the Random State seed to %d" % (cv_seed))
+    #    np.random.seed(cv_seed)
 
     # first check to see if the algorithms have already been run
     # and if the results should be overwritten
@@ -42,10 +43,14 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
         # a different file is stored for each repitition, so check each one
         for rep in range(1,num_reps+1):
             curr_runners_to_run = [] 
+            curr_seed = cv_seed
+            if curr_seed is not None:
+                # add the current repitition number to the seed
+                curr_seed += rep-1
             for run_obj in alg_runners:
                 out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
                     run_obj.out_dir, folds, rep,
-                    "-seed%s"%cv_seed if cv_seed is not None else "", run_obj.params_str)
+                    "-seed%s"%curr_seed if curr_seed is not None else "", run_obj.params_str)
                 if os.path.isfile(out_file):
                     print("%s already exists. Use --forcealg to overwite" % (out_file))
                 else:
@@ -56,8 +61,12 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
     for rep in range(1,num_reps+1):
         if len(runners_to_run[rep]) == 0:
             continue
+        curr_seed = cv_seed
+        if curr_seed is not None:
+            # add the current repitition number to the seed
+            curr_seed += rep-1
         # split the annotation matrix into training and testing matrices K times
-        ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, **kwargs)
+        ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, seed=curr_seed, **kwargs)
 
         for run_obj in runners_to_run[rep]:
             # because each fold contains a different set of positives, and combined they contain all positives,
@@ -92,7 +101,7 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
             # now evaluate the results and write to a file
             out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
                 run_obj.out_dir, folds, rep,
-                "-seed%s"%cv_seed if cv_seed is not None else "", run_obj.params_str)
+                "-seed%s"%curr_seed if curr_seed is not None else "", run_obj.params_str)
             utils.checkDir(os.path.dirname(out_file)) 
             eval_utils.evaluate_ground_truth(
                 combined_fold_scores, ann_obj, out_file,
@@ -103,9 +112,10 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
     return
 
 
-def split_cv_all_goterms(ann_obj, folds=5, **kwargs):
+def split_cv_all_goterms(ann_obj, folds=5, seed=None, **kwargs):
     """
     Split the positives and negatives into folds across all GO terms
+    *seed*: the seed used by the random number generator when generating the folds. If None, the np.random RandomState will be used
     *returns*: a list of tuples containing the (train pos, train neg, test pos, test neg)
     """
     ann_matrix = ann_obj.ann_matrix
@@ -128,7 +138,7 @@ def split_cv_all_goterms(ann_obj, folds=5, **kwargs):
             continue
         # print("%d positives, %d negatives for goterm %s" % (len(positives), len(negatives), goid))
         # split the set of positives and the set of negatives into K folds separately
-        kf = KFold(n_splits=folds, shuffle=True)
+        kf = KFold(n_splits=folds, shuffle=True, random_state=seed)
         kf.get_n_splits(positives)
         kf.get_n_splits(negatives)
         fold = 0
