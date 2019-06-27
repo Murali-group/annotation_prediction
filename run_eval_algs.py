@@ -104,6 +104,10 @@ def run():
 
     for dataset in input_settings['datasets']:
         net_obj, ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
+        # if there are no annotations, then skip this dataset
+        if len(ann_obj.goids) == 0:
+            print("No terms found. Skipping this dataset")
+            continue
         # the outputs will follow this structure:
         # outputs/<net_version>/<exp_name>/<alg_name>/output_files
         out_dir = "%s/%s/%s/" % (output_settings['output_dir'], dataset['net_version'], dataset['exp_name'])
