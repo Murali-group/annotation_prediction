@@ -88,7 +88,11 @@ def runFastSinkSource(P, positives, negatives=None, max_iters=1000, eps=0.0001, 
                 "iters: %d, max_iters: %d" % (num_iters, 1000) if solver == 'cg' else ''))
 
     # map back from the indices after deleting pos/neg to the original indices
-    scores_arr = np.zeros(num_nodes)
+    # the positives will be left as 1, and the rest of the unknown examples will get their score below
+    scores_arr = np.ones(num_nodes)
+    # set the negative examples to -1 
+    if negatives is not None:
+        scores_arr[negatives] = -1
     indices = [idx2node[n] for n in range(len(s))]
     scores_arr[indices] = s
 
