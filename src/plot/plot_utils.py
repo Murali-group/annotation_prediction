@@ -30,6 +30,7 @@ import numpy as np
 #print(sys.path)
 #import runner
 import src.algorithms.runner as runner
+import src.utils.file_utils as utils
 
 
 ALG_NAMES = {
@@ -40,29 +41,94 @@ ALG_NAMES = {
     'birgrank': 'BirgRank', 'aptrank': 'AptRank OneWay',
     }
 
+# TODO set colors for algorithms
+# and an ordering
+
 
 def main(config_map, **kwargs):
     input_settings = config_map['input_settings']
     #input_dir = input_settings['input_dir']
     alg_settings = config_map['algs']
     output_settings = config_map['output_settings']
-    # get the path to the specified files for each alg
-    df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
-    algs = df_all['Algorithm'].unique()
+    if 'term_stats' in kwargs:
+        df_stats_all = pd.DataFrame()
+        for f in kwargs['term_stats']:
+            df_stats = pd.read_csv(f, sep='\t')
+            df_stats_all = pd.concat([df_stats_all, df_stats])
+        kwargs['term_stats'] = df_stats_all
 
-    print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
-    #print(df_all.head())
-    results_overview(df_all, measures=kwargs['measures'])
+    utils.checkDir(os.path.dirname(kwargs['out_pref']))
+    if kwargs['prec_rec']:
+        # loop through all specified terms, or use an empty string if no terms were specified
+        for term in kwargs.get('goterm', ['']):
+            term = '-'+term if term != '' else ''
+            prec_rec = 'prec-rec' + term
+            kwargs['prec_rec'] = prec_rec
+            df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
 
-    # TODO currently only handles one dataset
-    title = df_all['plot_exp_name'].unique()[0]
+            title = '-'.join(df_all['plot_exp_name'].unique())
+            plot_curves(df_all, title=title, **kwargs)
+    else:
+        # get the path to the specified files for each alg
+        df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
+        algs = df_all['Algorithm'].unique()
 
-    # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
-    for measure in kwargs['measures']:
-        if kwargs['boxplot']:
-            plot_boxplot(df_all, measure=measure, title=title, **kwargs)
-        if kwargs['scatter']:
-            plot_scatter(df_all, measure=measure, title=title, **kwargs) 
+        print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
+        #print(df_all.head())
+        results_overview(df_all, measures=kwargs['measures'])
+
+        # TODO currently only handles one dataset
+        title = '-'.join(df_all['plot_exp_name'].unique())
+
+        # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
+        for measure in kwargs['measures']:
+            if kwargs['boxplot']:
+                plot_boxplot(df_all, measure=measure, title=title, **kwargs)
+            if kwargs['scatter']:
+                plot_scatter(df_all, measure=measure, title=title, **kwargs) 
+
+
+def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
+    """
+    Plot precision recall curves, or (TODO) ROC curves 
+    """
+    # make a prec-rec plot per term
+    for term in df["#goid"].unique():
+        curr_df = df[df['#goid'] == term]
+        print(curr_df.head())
+        # 
+        fig, ax = plt.subplots()
+        #sns.pointplot(x='rec', y='prec', hue='Algorithm', 
+        sns.lineplot(x='rec', y='prec', hue='Algorithm', data=curr_df,
+                ci=None, ax=ax,
+                )
+                #xlim=(0,1), ylim=(0,1), ci=None)
+        # TODO also put the fmax on the plot
+        ax.set_xlim(0,1)
+        ax.set_ylim(0,1)
+
+        ax.set_xlabel("Recall")
+        ax.set_ylabel("Precision")
+
+        if 'term_stats' in kwargs:
+            df_stats = kwargs['term_stats'] 
+            curr_df_stats = df_stats[df_stats['#GO term'] == term]
+            # TODO what if there are multiple stats lines?
+            term_name = curr_df_stats['GO term name'].values[0]
+            term_cat = curr_df_stats['GO category'].values[0]
+            # map O to Phenotypic abnormality
+            cat_map = {"O": "PA"}
+            term_cat = cat_map[term_cat] if term_cat in cat_map else term_cat
+            term_ann = curr_df_stats['# positive examples'].values[0]
+            print(term_name, term_cat, term_ann)
+            ax.set_title(title + "\n %s (%s) - %s, %s ann" % (term_name, term, term_cat, term_ann))
+        else:
+            ax.set_title(title + " %s" % (term))
+
+        if out_pref is not None:
+            out_file = "%s%s-prec-rec.pdf" % (out_pref, term)
+            print("Writing %s" % (out_file))
+            plt.savefig(out_file, bbox_inches='tight')
 
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
@@ -145,24 +211,43 @@ def load_all_results(input_settings, alg_settings, output_settings, **kwargs):
             if kwargs['algs'] is None:
                 if alg_params.get('should_run', [False])[0] is False:
                     continue
-            df = load_alg_results(
-                dataset, alg, alg_params, results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'])
-            # also add the net version and exp_name
-            df['net_version'] = dataset['net_version']
-            df['exp_name'] = dataset['exp_name']
-            if 'net_settings' in dataset and 'weight_method' in dataset['net_settings']:
-                df['weight_method'] = dataset['net_settings']['weight_method'] 
-            # if they specified a name to use in the plot for this experiment, then use that
-            plot_exp_name = "%s %s" % (dataset['net_version'], dataset['exp_name'])
-            if 'plot_exp_name' in dataset:
-                plot_exp_name = dataset['plot_exp_name']
-            df['plot_exp_name'] = plot_exp_name
-
-            df_all = pd.concat([df_all, df])
+            curr_seed = kwargs.get('cv_seed')
+            if 'cv-' in kwargs['exp_type']:
+                for rep in range(1,kwargs.get('num_reps',1)+1):
+                    if curr_seed is not None:
+                        curr_seed += rep-1
+                    curr_exp_type = "%s-rep%s%s" % (kwargs['exp_type'], rep, 
+                            "-seed%s" % (curr_seed) if curr_seed is not None else "")
+                    df = load_alg_results(
+                        dataset, alg, alg_params, prec_rec=kwargs['prec_rec'],
+                        results_dir=output_settings['output_dir'], exp_type=curr_exp_type)
+                    add_dataset_settings(dataset, df) 
+                    df['rep'] = rep
+                    df_all = pd.concat([df_all, df])
+            else:
+                df = load_alg_results(
+                    dataset, alg, alg_params, prec_rec=kwargs['prec_rec'], 
+                    results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'])
+                add_dataset_settings(dataset, df) 
+                df_all = pd.concat([df_all, df])
     return df_all
 
 
-def load_alg_results(dataset, alg, alg_params, results_dir='outputs', exp_type='cv-5folds'):
+def add_dataset_settings(dataset, df):
+    # also add the net version and exp_name
+    df['net_version'] = dataset['net_version']
+    df['exp_name'] = dataset['exp_name']
+    if 'net_settings' in dataset and 'weight_method' in dataset['net_settings']:
+        df['weight_method'] = dataset['net_settings']['weight_method'] 
+    # if they specified a name to use in the plot for this experiment, then use that
+    plot_exp_name = "%s %s" % (dataset['net_version'], dataset['exp_name'])
+    if 'plot_exp_name' in dataset:
+        plot_exp_name = dataset['plot_exp_name']
+    df['plot_exp_name'] = plot_exp_name
+    return df
+
+
+def load_alg_results(dataset, alg, alg_params, prec_rec="", results_dir='outputs', exp_type='cv-5folds'):
     """
     For a given dataset and algorithm, build the file path and load the results
     *results_dir*: the base output directory
@@ -185,7 +270,7 @@ def load_alg_results(dataset, alg, alg_params, results_dir='outputs', exp_type='
     for param_combo in combos:
         # first get the parameter string for this runner
         params_str = runner.get_runner_params_str(alg, dataset, param_combo)
-        cv_file = "%s/%s/%s%s.txt" % (out_dir, alg, exp_type, params_str)
+        cv_file = "%s/%s/%s%s%s.txt" % (out_dir, alg, exp_type, params_str, prec_rec)
         if not os.path.isfile(cv_file):
             print("\tnot found %s - skipping" % (cv_file))
             continue
@@ -227,6 +312,7 @@ def setup_opts():
 
     # general parameters
     group = OptionGroup(parser, 'Main Options')
+    # TODO take multiple config files
     group.add_option('','--config', type='string', default="config-files/config.yaml",
                      help="Configuration file")
     group.add_option('-A', '--alg', type='string', action="append",
@@ -239,6 +325,12 @@ def setup_opts():
                      help="Force overwitting plot files")
     group.add_option('', '--exp-type', type='string', default='cv-5folds',
                      help='Type of experiment (e.g., cv-5fold, temporal-holdout). Default: cv-5folds')
+    group.add_option('', '--num-reps', type='int', default=1,
+                     help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
+    group.add_option('', '--cv-seed', type='int', default=1,
+                     help="Seed used when running CV")
+    group.add_option('', '--term-stats', type='string', action='append',
+                     help="File which contains the term name, # ann and other statistics such as depth. Can specify multiple")
     parser.add_option_group(group)
 
     # plotting parameters
