@@ -50,7 +50,7 @@ def main(config_map, **kwargs):
     #input_dir = input_settings['input_dir']
     alg_settings = config_map['algs']
     output_settings = config_map['output_settings']
-    if 'term_stats' in kwargs:
+    if kwargs.get('term_stats') is not None:
         df_stats_all = pd.DataFrame()
         for f in kwargs['term_stats']:
             df_stats = pd.read_csv(f, sep='\t')
@@ -99,6 +99,7 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
         # 
         fig, ax = plt.subplots()
         #sns.pointplot(x='rec', y='prec', hue='Algorithm', 
+        # TODO get only the positive examples. Then show the standard deviation from the repititions
         sns.lineplot(x='rec', y='prec', hue='Algorithm', data=curr_df,
                 ci=None, ax=ax,
                 )
@@ -110,7 +111,7 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
         ax.set_xlabel("Recall")
         ax.set_ylabel("Precision")
 
-        if 'term_stats' in kwargs:
+        if kwargs.get('term_stats') is not None:
             df_stats = kwargs['term_stats'] 
             curr_df_stats = df_stats[df_stats['#GO term'] == term]
             # TODO what if there are multiple stats lines?
