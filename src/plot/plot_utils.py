@@ -63,14 +63,20 @@ def main(config_map, **kwargs):
         for term in kwargs.get('goterm', ['']):
             term = '-'+term if term != '' else ''
             prec_rec = 'prec-rec' + term
-            kwargs['prec_rec'] = prec_rec
-            df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
+            #kwargs['prec_rec'] = prec_rec
+            df_all = load_all_results(input_settings, alg_settings, output_settings, prec_rec_str=prec_rec, **kwargs)
+            if len(df_all) == 0:
+                print("no terms found. Quitting")
+                sys.exit()
 
             title = '-'.join(df_all['plot_exp_name'].unique())
             plot_curves(df_all, title=title, **kwargs)
     else:
         # get the path to the specified files for each alg
         df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
+        if len(df_all) == 0:
+            print("no terms found. Quitting")
+            sys.exit()
         algs = df_all['Algorithm'].unique()
 
         print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
@@ -194,7 +200,7 @@ def results_overview(df, measures=['fmax']):
                 print("\t%s: %0.3f \t\t(%d terms)" % (alg, df_alg.median(), len(df_alg)))
 
 
-def load_all_results(input_settings, alg_settings, output_settings, **kwargs):
+def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str="", **kwargs):
     """
     Load all of the results for the datasets and algs specified in the config file
     """
@@ -220,14 +226,14 @@ def load_all_results(input_settings, alg_settings, output_settings, **kwargs):
                     curr_exp_type = "%s-rep%s%s" % (kwargs['exp_type'], rep, 
                             "-seed%s" % (curr_seed) if curr_seed is not None else "")
                     df = load_alg_results(
-                        dataset, alg, alg_params, prec_rec=kwargs['prec_rec'],
+                        dataset, alg, alg_params, prec_rec=prec_rec_str,
                         results_dir=output_settings['output_dir'], exp_type=curr_exp_type)
                     add_dataset_settings(dataset, df) 
                     df['rep'] = rep
                     df_all = pd.concat([df_all, df])
             else:
                 df = load_alg_results(
-                    dataset, alg, alg_params, prec_rec=kwargs['prec_rec'], 
+                    dataset, alg, alg_params, prec_rec=prec_rec_str, 
                     results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'])
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
