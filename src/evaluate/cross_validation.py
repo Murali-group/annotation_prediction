@@ -35,7 +35,7 @@ def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, 
 
     # first check to see if the algorithms have already been run
     # and if the results should be overwritten
-    if kwargs['forcealg'] is True:
+    if kwargs['forcealg'] is True or len(goids) == 1:
         # runners_to_run is a list of runners for each repitition
         runners_to_run = {i: alg_runners for i in range(1,num_reps+1)}
     else:

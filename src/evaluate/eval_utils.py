@@ -168,16 +168,24 @@ def compute_eval_measures(scores, positives, negatives=None,
         return precision, recall, fpr
 
 
-def compute_fmax(prec, rec):
+def compute_fmax(prec, rec, fmax_idx=False):
+    """
+    *fmax_idx*: also return the index at which the harmonic mean is the greatest
+    """
     f_measures = []
     for i in range(len(prec)):
         p, r = prec[i], rec[i]
         if p+r == 0:
             harmonic_mean = 0
         else:
+            # see https://en.wikipedia.org/wiki/Harmonic_mean#Two_numbers
             harmonic_mean = (2*p*r)/(p+r)
         f_measures.append(harmonic_mean)
-    return max(f_measures)
+    if fmax_idx:
+        idx = np.argmax(np.asarray(f_measures))
+        return max(f_measures), idx
+    else:
+        return max(f_measures)
 
 
 def compute_avgp(prec, rec):

@@ -31,6 +31,7 @@ import numpy as np
 #import runner
 import src.algorithms.runner as runner
 import src.utils.file_utils as utils
+import src.evaluate.eval_utils as eval_utils
 
 
 ALG_NAMES = {
@@ -58,9 +59,11 @@ def main(config_map, **kwargs):
         kwargs['term_stats'] = df_stats_all
 
     utils.checkDir(os.path.dirname(kwargs['out_pref']))
+    # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
         # loop through all specified terms, or use an empty string if no terms were specified
-        for term in kwargs.get('goterm', ['']):
+        terms = kwargs['goterm'] if kwargs['goterm'] is not None else ['']
+        for term in terms:
             term = '-'+term if term != '' else ''
             prec_rec = 'prec-rec' + term
             #kwargs['prec_rec'] = prec_rec
@@ -99,23 +102,43 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
     Plot precision recall curves, or (TODO) ROC curves 
     """
     # make a prec-rec plot per term
-    for term in df["#goid"].unique():
+    for term in sorted(df["#goid"].unique()):
         curr_df = df[df['#goid'] == term]
-        print(curr_df.head())
-        # 
+        # get only the positive idx to plot prec_rec
+        curr_df = curr_df[curr_df['pos/neg'] == 1]
+        # also put the fmax on the plot, and add it to the label
+        new_alg_names = []
+        fmax_points = {}
+        for alg in curr_df['Algorithm'].unique():
+            df_alg = curr_df[curr_df['Algorithm'] == alg]
+            #print(df_alg['prec'], df_alg['rec'])
+            fmax, idx = eval_utils.compute_fmax(df_alg['prec'].values, df_alg['rec'].values, fmax_idx=True)
+            new_alg_name = "%s (%0.3f)" % (alg, fmax)
+            new_alg_names.append(new_alg_name) 
+            fmax_points[alg] = (df_alg['prec'].values[idx], df_alg['rec'].values[idx])
+
         fig, ax = plt.subplots()
         #sns.pointplot(x='rec', y='prec', hue='Algorithm', 
         # TODO get only the positive examples. Then show the standard deviation from the repititions
         sns.lineplot(x='rec', y='prec', hue='Algorithm', data=curr_df,
-                ci=None, ax=ax,
+                ci=None, ax=ax, legend=False,
                 )
                 #xlim=(0,1), ylim=(0,1), ci=None)
-        # TODO also put the fmax on the plot
+
         ax.set_xlim(0,1)
         ax.set_ylim(0,1)
 
+        ax.legend(title="Alg (Fmax)", labels=new_alg_names)
         ax.set_xlabel("Recall")
         ax.set_ylabel("Precision")
+
+        # also add the fmax point to the plot
+        for i, alg in enumerate(fmax_points):
+            prec, rec = fmax_points[alg]
+            print(term, alg, prec, rec)
+            print(term, 2.0 / ((1.0/prec) + (1.0/rec)))
+            #print((2*prec*rec) / (prec + rec))
+            ax.plot([rec], [prec], marker="*", color=sns.color_palette()[i])
 
         if kwargs.get('term_stats') is not None:
             df_stats = kwargs['term_stats'] 
@@ -136,6 +159,8 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
             out_file = "%s%s-prec-rec.pdf" % (out_pref, term)
             print("Writing %s" % (out_file))
             plt.savefig(out_file, bbox_inches='tight')
+            plt.savefig(out_file.replace('.pdf','.png'), bbox_inches='tight')
+            plt.close()
 
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
