@@ -104,7 +104,7 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
     # make a prec-rec plot per term
     for term in sorted(df["#goid"].unique()):
         curr_df = df[df['#goid'] == term]
-        # get only the positive idx to plot prec_rec
+        # get only the positive examples to plot prec_rec
         curr_df = curr_df[curr_df['pos/neg'] == 1]
         # also put the fmax on the plot, and add it to the label
         new_alg_names = []
@@ -118,15 +118,14 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
             fmax_points[alg] = (df_alg['prec'].values[idx], df_alg['rec'].values[idx])
 
         fig, ax = plt.subplots()
-        #sns.pointplot(x='rec', y='prec', hue='Algorithm', 
-        # TODO get only the positive examples. Then show the standard deviation from the repititions
+        # TODO show the standard deviation from the repititions
         sns.lineplot(x='rec', y='prec', hue='Algorithm', data=curr_df,
                 ci=None, ax=ax, legend=False,
                 )
                 #xlim=(0,1), ylim=(0,1), ci=None)
 
-        ax.set_xlim(0,1)
-        ax.set_ylim(0,1)
+        ax.set_xlim(-0.02,1.02)
+        ax.set_ylim(-0.02,1.02)
 
         ax.legend(title="Alg (Fmax)", labels=new_alg_names)
         ax.set_xlabel("Recall")
@@ -135,9 +134,6 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
         # also add the fmax point to the plot
         for i, alg in enumerate(fmax_points):
             prec, rec = fmax_points[alg]
-            print(term, alg, prec, rec)
-            print(term, 2.0 / ((1.0/prec) + (1.0/rec)))
-            #print((2*prec*rec) / (prec + rec))
             ax.plot([rec], [prec], marker="*", color=sns.color_palette()[i])
 
         if kwargs.get('term_stats') is not None:
@@ -146,8 +142,8 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
             # TODO what if there are multiple stats lines?
             term_name = curr_df_stats['GO term name'].values[0]
             term_cat = curr_df_stats['GO category'].values[0]
-            # map O to Phenotypic abnormality
-            cat_map = {"O": "PA"}
+            # For HPO, map O to Phenotypic abnormality
+            cat_map = {"O": "PA", 'P': 'BP', 'F': 'MF', 'c': 'CC'}
             term_cat = cat_map[term_cat] if term_cat in cat_map else term_cat
             term_ann = curr_df_stats['# positive examples'].values[0]
             print(term_name, term_cat, term_ann)
