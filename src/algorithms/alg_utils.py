@@ -119,7 +119,7 @@ def setup_sparse_network(network_file, node2idx_file=None, forced=False):
     """
     Takes a network file and converts it to a sparse matrix
     """
-    sparse_net_file = network_file.replace('.txt', '.npz')
+    sparse_net_file = network_file.replace('.'+network_file.split('.')[-1], '.npz')
     if node2idx_file is None:
         node2idx_file = sparse_net_file + "-node-ids.txt"
     if forced is False and (os.path.isfile(sparse_net_file) and os.path.isfile(node2idx_file)):
@@ -133,10 +133,12 @@ def setup_sparse_network(network_file, node2idx_file=None, forced=False):
     elif os.path.isfile(network_file):
         print("Reading network from %s" % (network_file))
         u,v,w = [], [], []
-        # TODO make sure the network is symmetrical
-        with open(network_file, 'r') as f:
-            # add tqdm?
-            for line in tqdm(f, total=120000000):
+        open_func = gzip.open if network_file.endswith('.gz') else open
+        with open_func(network_file, 'r') as f:
+            for line in f:
+                line = line.decode() if network_file.endswith('.gz') else line
+                if line[0] == '#':
+                    continue
                 line = line.rstrip().split('\t')
                 u.append(line[0])
                 v.append(line[1])
