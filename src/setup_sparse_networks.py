@@ -83,11 +83,30 @@ class Sparse_Networks:
                 self.normalized_nets.append(_net_normalize(net))
 
     def weight_SWSN(self, ann_matrix):
-        return weight_SWSN(ann_matrix, self.normalized_nets,
-                           net_names=self.net_names, nodes=self.nodes)
+        self.W_SWSN, process_time = weight_SWSN(ann_matrix, self.normalized_nets,
+                             net_names=self.net_names, nodes=self.nodes)
+        return self.W_SWSN, process_time
 
     def weight_GM2008(self, y, goid):
         return weight_GM2008(y, self.normalized_nets, self.net_names, goid)
+
+    def save_net(self, out_file):
+        print("Writing %s" % (out_file))
+        utils.checkDir(os.path.dirname(out_file))
+        if out_file.endswith('.npz'):
+            # when the net was loaded, the idx file was already written
+            # so no need to write it again
+            sparse.save_npz(out_file, self.W_SWSN)
+        else:
+            # convert the adjacency matrix to an edgelist
+            G = nx.from_scipy_sparse_matrix(self.W_SWSN)
+            idx2node = {i: n for i, n in enumerate(self.nodes)}
+            # see also convert_node_labels_to_integers
+            G = nx.relabel_nodes(G, idx2node, copy=False)
+            delimiter = '\t'
+            if out_file.endswith('.csv'):
+                delimiter = ','
+            nx.write_weighted_edgelist(G, out_file, delimiter=delimiter)
 
 
 class Sparse_Annotations:
