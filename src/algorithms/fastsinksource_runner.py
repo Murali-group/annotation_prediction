@@ -18,6 +18,7 @@ def setupInputs(run_obj):
     run_obj.goids = run_obj.ann_obj.goids
 
     if run_obj.net_obj.weight_swsn:
+        # TODO if the net obj already has the W_SWSN object, then use that instead
         W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
         run_obj.P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=run_obj.params.get('lambda', None))
         run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
@@ -63,6 +64,8 @@ def run(run_obj):
     alg = run_obj.name
     params = run_obj.params
 
+    print("Running %s with these parameters: %s" % (alg, params))
+
     # run FastSinkSource on each GO term individually
     for i in trange(run_obj.ann_matrix.shape[0]):
         goid = run_obj.goids[i]
@@ -92,8 +95,9 @@ def run(run_obj):
                 P, positives, negatives=negatives)
             iters = 1
 
-        tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
-                "(%0.4f sec) for %s" % (process_time, goid))
+        if run_obj.kwargs.get('verbose', False) is True:
+            tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
+                    "(%0.4f sec) for %s" % (process_time, goid))
 
         ## if they're different dimensions, then set the others to zeros 
         #if len(scores_arr) < goid_scores.shape[1]:
@@ -101,8 +105,9 @@ def run(run_obj):
         goid_scores[i] = scores
 
         # also keep track of the time it takes for each of the parameter sets
-        params_results["%s_wall_time"%alg] += wall_time
-        params_results["%s_process_time"%alg] += process_time
+        alg_name = "%s%s" % (alg, run_obj.params_str)
+        params_results["%s_wall_time"%alg_name] += wall_time
+        params_results["%s_process_time"%alg_name] += process_time
 
     run_obj.goid_scores = goid_scores
     run_obj.params_results = params_results

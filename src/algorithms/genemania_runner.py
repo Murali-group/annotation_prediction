@@ -70,8 +70,9 @@ def run(run_obj):
 
         # now actually run the algorithm
         scores, process_time, wall_time, iters = genemania.runGeneMANIA(L, y, tol=float(run_obj.params['tol']), verbose=run_obj.kwargs.get('verbose', False))
-        tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
-                "(%0.3f sec, %0.3f wall_time) for %s" % (process_time, wall_time, goid))
+        if run_obj.kwargs.get('verbose', False) is True:
+            tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
+                    "(%0.3f sec, %0.3f wall_time) for %s" % (process_time, wall_time, goid))
 
         ## if they're different dimensions, then set the others to zeros 
         #if len(scores_arr) < goid_scores.shape[1]:
@@ -79,8 +80,9 @@ def run(run_obj):
         goid_scores[i] = scores
 
         # also keep track of the time it takes for each of the parameter sets
-        params_results["%s_wall_time"%alg] += wall_time
-        params_results["%s_process_time"%alg] += process_time
+        alg_name = "%s%s" % (alg, run_obj.params_str)
+        params_results["%s_wall_time"%alg_name] += wall_time
+        params_results["%s_process_time"%alg_name] += process_time
 
     run_obj.goid_scores = goid_scores
     run_obj.params_results = params_results
