@@ -36,7 +36,7 @@ def parse_args(args):
     (opts, args) = parser.parse_args(args)
     kwargs = vars(opts)
     with open(opts.config, 'r') as conf:
-        config_map = yaml.load(conf)
+        config_map = yaml.load(conf, Loader=yaml.FullLoader)
     # TODO check to make sure the inputs are correct in config_map
 
     #if opts.exp_name is None or opts.pos_neg_file is None:
@@ -118,6 +118,12 @@ def run():
         if kwargs['only_cv'] is False:
             # run algorithms in "prediction" mode 
             run_algs(alg_runners, **kwargs) 
+            # if specified, write the SWSN combined network to a file
+            save_net = dataset['net_settings'].get('save_net', None) if 'net_settings' in dataset else None
+            if net_obj.weight_swsn is True and save_net is not None:
+                out_file = "%s/%s/%s" % (input_dir, dataset['net_version'], save_net)
+                # the SWSN network is part of the runner object. Need to organize that better
+                net_obj.save_net(out_file)
 
 
 def setup_net(input_dir, dataset, **kwargs):
@@ -237,6 +243,8 @@ def run_algs(alg_runners, **kwargs):
             else:
                 runners_to_run.append(run_obj)
 
+    params_results = {}
+
     print("Generating inputs")
     # now setup the inputs for the runners
     for run_obj in runners_to_run:
@@ -247,6 +255,8 @@ def run_algs(alg_runners, **kwargs):
     # TODO storing all of the runners scores simultaneously could be costly (too much RAM).
     for run_obj in runners_to_run:
         run_obj.run()
+        print(run_obj.params_results)
+        params_results.update(run_obj.params_results)
 
     # parse the outputs. Only needed for the algs that write output files
     for run_obj in runners_to_run:
@@ -269,6 +279,7 @@ def run_algs(alg_runners, **kwargs):
             write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
                          out_file, num_pred_to_write=num_pred_to_write)
 
+    print(params_results)
     print("Finished")
 
 
