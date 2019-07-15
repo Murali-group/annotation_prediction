@@ -58,6 +58,20 @@ def main(config_map, **kwargs):
             df_stats_all = pd.concat([df_stats_all, df_stats])
         kwargs['term_stats'] = df_stats_all
 
+    if kwargs['out_pref'] is None:
+        kwargs['out_pref'] = "%s/viz/%s/%s/" % (
+                output_settings['output_dir'], 
+                input_settings['datasets'][0]['net_version'], 
+                input_settings['datasets'][0]['exp_name'])
+    if kwargs['only_terms'] is not None:
+        only_terms = pd.read_csv(kwargs['only_terms'], sep='\t', index_col=None)
+        only_terms = only_terms.iloc[:,0].values
+        print("limitting to %d terms from %s" % (len(only_terms), kwargs['only_terms']))
+        kwargs['only_terms'] = only_terms
+        # setup the name to add to the output file
+        only_terms_postfix = kwargs['only_terms_name'].lower() + str(len(kwargs['only_terms'])) + '-'
+        kwargs['out_pref'] += only_terms_postfix
+
     utils.checkDir(os.path.dirname(kwargs['out_pref']))
     # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
@@ -71,6 +85,9 @@ def main(config_map, **kwargs):
             if len(df_all) == 0:
                 print("no terms found. Quitting")
                 sys.exit()
+            # limit to the specified terms
+            if kwargs['only_terms'] is not None:
+                df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
 
             title = '-'.join(df_all['plot_exp_name'].unique())
             plot_curves(df_all, title=title, **kwargs)
@@ -80,6 +97,9 @@ def main(config_map, **kwargs):
         if len(df_all) == 0:
             print("no terms found. Quitting")
             sys.exit()
+        # limit to the specified terms
+        if kwargs['only_terms'] is not None:
+            df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
         algs = df_all['Algorithm'].unique()
 
         print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
@@ -88,6 +108,8 @@ def main(config_map, **kwargs):
 
         # TODO currently only handles one dataset
         title = '-'.join(df_all['plot_exp_name'].unique())
+        if kwargs['only_terms_name'] != '':
+            title += " \n %d %s terms" % (len(kwargs['only_terms']), kwargs['only_terms_name'])
 
         # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
         for measure in kwargs['measures']:
@@ -160,29 +182,45 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
 
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
+    # change the index to the terms
+    df.set_index(df.columns[0], inplace=True)
     algs = df['Algorithm'].unique()
-    df2 = df[['fmax', 'Algorithm']]
-    df2 = df2.pivot(columns='Algorithm')
-    df2.columns = [' '.join(col).strip() for col in df2.columns.values]
-    # if there are only two algorithms, make a joint plot
-    if len(algs) == 2:
-        g = sns.jointplot(df2.columns[0], df2.columns[1], data=df2, xlim=(-0.02,1.02), ylim=(-0.02,1.02))
-        # also plot x=y
-        g.ax_joint.plot((0,1),(0,1))
-    # if there are more, a pairplot
-    else:
-        g = sns.pairplot(data=df2)
-        g.set(xlim=(-0.02,1.02), ylim=(-0.02,1.02))
-        # draw the x=y lines
-        for i in range(len(algs)):
-            for j in range(len(algs)):
-                if i != j:
-                    g.axes[i][j].plot((0,1),(0,1))
+    df2 = df[[measure, 'Algorithm']]
+    if kwargs['term_stats'] is not None:
+        df_stats = kwargs['term_stats'] 
+        # change the index to the terms
+        df_stats.set_index(df_stats.columns[0], inplace=True)
+        # plot the fmax by the # annotations
+        df2['num_ann'] = df_stats['# positive examples']
 
-    plt.title(title)
+        # now plot the # annotations on the x axis, and the fmax on the y axis
+        ax = sns.scatterplot('num_ann', measure, hue='Algorithm', data=df2,
+                             linewidth=0,)
+        plt.title(title)
+    else:
+        df2 = df2.pivot(columns='Algorithm')
+        df2.columns = [' '.join(col).strip() for col in df2.columns.values]
+        # if there are only two algorithms, make a joint plot
+        if len(algs) == 2:
+            g = sns.jointplot(df2.columns[0], df2.columns[1], data=df2, xlim=(-0.02,1.02), ylim=(-0.02,1.02))
+            # also plot x=y
+            g.ax_joint.plot((0,1),(0,1))
+        # if there are more, a pairplot
+        else:
+            g = sns.pairplot(data=df2)
+            g.set(xlim=(-0.02,1.02), ylim=(-0.02,1.02))
+            # draw the x=y lines
+            for i in range(len(algs)):
+                for j in range(len(algs)):
+                    if i != j:
+                        g.axes[i][j].plot((0,1),(0,1))
+
+        # move the plots down a bit so the title isn't overalpping the subplots
+        plt.subplots_adjust(top=0.9)
+        g.fig.suptitle(title)
 
     if out_pref is not None:
-        out_file = "%s-%s-scatter.pdf" % (out_pref, measure)
+        out_file = "%s%s-scatter.pdf" % (out_pref, measure)
         print("Writing %s" % (out_file))
         plt.savefig(out_file, bbox_inches='tight')
 
@@ -202,7 +240,7 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
     plt.title(title)
 
     if out_pref is not None:
-        out_file = "%s-%s-boxplot.pdf" % (out_pref, measure)
+        out_file = "%s%s-boxplot.pdf" % (out_pref, measure)
         print("Writing %s" % (out_file))
         plt.savefig(out_file, bbox_inches='tight')
 
@@ -248,14 +286,18 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
                             "-seed%s" % (curr_seed) if curr_seed is not None else "")
                     df = load_alg_results(
                         dataset, alg, alg_params, prec_rec=prec_rec_str,
-                        results_dir=output_settings['output_dir'], exp_type=curr_exp_type)
+                        results_dir=output_settings['output_dir'], exp_type=curr_exp_type,
+                        only_terms=kwargs.get('only_terms'),
+                    )
                     add_dataset_settings(dataset, df) 
                     df['rep'] = rep
                     df_all = pd.concat([df_all, df])
             else:
                 df = load_alg_results(
                     dataset, alg, alg_params, prec_rec=prec_rec_str, 
-                    results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'])
+                    results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'],
+                    only_terms=kwargs.get('only_terms'),
+                )
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
     return df_all
@@ -275,10 +317,13 @@ def add_dataset_settings(dataset, df):
     return df
 
 
-def load_alg_results(dataset, alg, alg_params, prec_rec="", results_dir='outputs', exp_type='cv-5folds'):
+def load_alg_results(dataset, alg, alg_params, prec_rec="", results_dir='outputs', exp_type='cv-5folds', only_terms=None):
     """
     For a given dataset and algorithm, build the file path and load the results
+    *prec_rec*: postfix to change file name. Usually 'prec-rec' if loading precision recal values
     *results_dir*: the base output directory
+    *exp_type*: The string specifying the evaluation type. For example: 'cv-5folds' or 'th' for temporal holdout
+    *terms*: a set of terms for which to limit the output
     """
     alg_name = alg
     # if a name is specified to use when plotting, then get that
@@ -317,7 +362,7 @@ def parse_args(args):
     (opts, args) = parser.parse_args(args)
     kwargs = vars(opts)
     with open(opts.config, 'r') as conf:
-        config_map = yaml.load(conf)
+        config_map = yaml.load(conf, Loader=yaml.FullLoader)
     # TODO check to make sure the inputs are correct in config_map
 
     #if opts.exp_name is None or opts.pos_neg_file is None:
@@ -345,20 +390,24 @@ def setup_opts():
                      help="Configuration file")
     group.add_option('-A', '--alg', type='string', action="append",
                      help="Algorithms to plot. Must be in the config file. If specified, will ignore 'should_run' in the config file")
-    group.add_option('-o', '--out-pref', type='string', default="test",
-                     help="Output prefix for writing plot to file. Default: test")
+    group.add_option('-o', '--out-pref', type='string', 
+                     help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
     group.add_option('-G', '--goterm', type='string', action="append",
                      help="Specify the GO terms to use (should be in GO:00XX format)")
     group.add_option('', '--forceplot', action='store_true', default=False,
-                     help="Force overwitting plot files")
+                     help="Force overwitting plot files if they exist. TODO not yet implemented.")
     group.add_option('', '--exp-type', type='string', default='cv-5folds',
                      help='Type of experiment (e.g., cv-5fold, temporal-holdout). Default: cv-5folds')
     group.add_option('', '--num-reps', type='int', default=1,
                      help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
-    group.add_option('', '--cv-seed', type='int', default=1,
+    group.add_option('', '--cv-seed', type='int', 
                      help="Seed used when running CV")
     group.add_option('', '--term-stats', type='string', action='append',
                      help="File which contains the term name, # ann and other statistics such as depth. Can specify multiple")
+    group.add_option('', '--only-terms', type='string', 
+                     help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
+    group.add_option('', '--only-terms-name', type='string', default='',
+                     help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
     parser.add_option_group(group)
 
     # plotting parameters
@@ -368,7 +417,8 @@ def setup_opts():
     group.add_option('', '--boxplot', action='store_true', default=False,
                      help="Compare all runners in the config file using a boxplot")
     group.add_option('', '--scatter', action='store_true', default=False,
-                     help="Make a joint plot, or pair plot if more than two runners are given.")
+                     help="Make a scatterplot, or pair plot if more than two runners are given." +
+                     "If the # ann are given with --term-stats, then plot the fmax by the # ann")
     group.add_option('', '--prec-rec', action='store_true', default=False,
                      help="Make a precision recall curve for each specified term")
     parser.add_option_group(group)
