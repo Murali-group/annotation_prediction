@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from collections import defaultdict
 from scipy import sparse
 # needed for evaluation metrics
 try:
@@ -12,7 +13,14 @@ except ImportError:
 def evaluate_ground_truth(
         goid_scores, ann_obj, out_file,
         non_pos_as_neg_eval=False, taxon='-',
-        alg='', write_prec_rec=False, append=True, **kwargs):
+        alg='', early_prec=None, write_prec_rec=False, 
+        append=True, **kwargs):
+    """
+    *early_prec*: A list of recall values for which to get the precision. 
+        Each will get its own column in the output file
+    *write_prec_rec*: For every term, write a file containing the 
+        precision and recall at every positive and negative example
+    """
     true_ann_matrix = ann_obj.ann_matrix
     goids, prots = ann_obj.goids, ann_obj.prots
 
@@ -54,7 +62,7 @@ def evaluate_ground_truth(
         prec, recall, fpr, pos_neg_stats = compute_eval_measures(
                 scores, positives, negatives=negatives, 
                 track_pos=True, track_neg=True)
-        if write_prec_rec:
+        if write_prec_rec or early_prec is not None:
             goid_prec_rec[goid] = (prec, recall, pos_neg_stats)
         fmax = compute_fmax(prec, recall)
         avgp = compute_avgp(prec, recall)
@@ -68,6 +76,23 @@ def evaluate_ground_truth(
         if kwargs['verbose']:
             print("%s fmax: %0.4f" % (goid, fmax))
 
+    early_prec_header = "" 
+    early_prec_str = defaultdict(str) 
+    if early_prec is not None:
+        # figure out how many columns to write for early precision
+        early_prec_header = ["prec-%s-rec" % (r) for r in early_prec]
+        # for each GO term, format the output columns now.
+        for g, (prec, rec, _) in goid_prec_rec.items():
+            early_prec_values = []
+            for curr_recall in early_prec:
+                # find the first precision value >= the specified recall
+                for p, r in zip(prec, rec):
+                    if r >= curr_recall:
+                        early_prec_values.append(p)
+                        break
+            # now format the values so they'll be ready to be written to the output file
+            early_prec_str[g] = '\t'+'\t'.join("%0.4f" % (p) for p in early_prec_values)
+
     # skip writing the CV file if there's only one term specified
     if write_prec_rec and len(goid_prec_rec) == 1:
         print("skipping writing %s" % (out_file))
@@ -76,16 +101,19 @@ def evaluate_ground_truth(
         if not os.path.isfile(out_file) or not append:
             print("Writing results to %s" % (out_file))
             with open(out_file, 'w') as out:
-                if taxon in ['-', None]:
-                    out.write("#goid\tfmax\tavgp\tauprc\tauroc\t# ann\n")
+                header_line = "#goid\tfmax\tavgp\tauprc\tauroc"
+                if taxon not in ['-', None]:
+                    header_line = "#taxon\t%s\t# test ann" % (header_line)
                 else:
-                    out.write("#taxon\tgoid\tfmax\tavgp\tauprc\tauroc\t# test ann\n")
+                    header_line += "\t# ann"
+                header_line += '\t' + '\t'.join(early_prec_header)
+                out.write(header_line+"\n")
         else:
             print("Appending results to %s" % (out_file))
         with open(out_file, 'a') as out:
-            out.write(''.join(["%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d\n" % (
+            out.write(''.join(["%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
                 "%s\t"%taxon if taxon not in ["-", None] else "",
-                g, fmax, avgp, auprc, auroc, goid_num_pos[g]
+                g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str[g]
                 ) for g, (fmax, avgp, auprc, auroc) in goid_stats.items()]))
 
     if write_prec_rec:

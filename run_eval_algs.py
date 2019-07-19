@@ -54,42 +54,48 @@ def setup_opts():
     # general parameters
     group = OptionGroup(parser, 'Main Options')
     group.add_option('','--config', type='string', default="config-files/config.yaml",
-                     help="Configuration file")
+            help="Configuration file")
     group.add_option('-G', '--goterm', type='string', action="append",
-                     help="Specify the GO terms to use. Can use this option multiple times")
+            help="Specify the GO terms to use. Can use this option multiple times")
     parser.add_option_group(group)
 
     # evaluation parameters
     group = OptionGroup(parser, 'Evaluation options')
-    group.add_option('', '--only-cv', action="store_true", default=False,
-                     help="Perform cross-validation only")
+    group.add_option('', '--only-eval', action="store_true", default=False,
+            help="Perform evaluation only (i.e., skip prediction mode)")
+    group.add_option('', '--loso', type='string', 
+            help="Leave-One-Species-Out evaluation. Give the path to a file containing the species designation. For each species, leave out all of its annotations " +
+            "and evaluate how well they can be recovered from the annotations of the other species. ")
     group.add_option('-C', '--cross-validation-folds', type='int',
-                     help="Perform cross validation using the specified # of folds. Usually 5")
+            help="Perform cross validation using the specified # of folds. Usually 5")
     group.add_option('', '--num-reps', type='int', default=1,
-                     help="Number of times to repeat the CV process. Default=1")
+            help="Number of times to repeat the CV process. Default=1")
     group.add_option('', '--cv-seed', type='int', 
-                     help="Seed to use for the random number generator when splitting the annotations into folds. " + \
-                     "If --num-reps > 1, the seed will be incremented by 1 each time. Should only be used for testing purposes")
+            help="Seed to use for the random number generator when splitting the annotations into folds. " + \
+            "If --num-reps > 1, the seed will be incremented by 1 each time. Should only be used for testing purposes")
     group.add_option('', '--write-prec-rec', action="store_true", default=False,
-                     help="Also write a file containing the precision and recall for every positive example. " + \
-                          "If a single term is given, only the prec-rec file, with the term in its name, will be written.")
+            help="Also write a file containing the precision and recall for every positive example. " + \
+            "If a single term is given, only the prec-rec file, with the term in its name, will be written.")
+    group.add_option('-E', '--early-prec', type='float', action="append", 
+            help="Report the precision at the specified recall value. Can specify multiple")
     parser.add_option_group(group)
 
     # additional parameters
     group = OptionGroup(parser, 'Additional options')
     group.add_option('-W', '--num-pred-to-write', type='int', default=10,
-                     help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
+            help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
     group.add_option('-N', '--factor-pred-to-write', type='float', 
-                     help="Write the predictions <factor>*num_pos for each term to file. For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
+            help="Write the predictions <factor>*num_pos for each term to file. " +
+            "For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
     # TODO finish adding this option
     #group.add_option('-T', '--ground-truth-file', type='string',
     #                 help="File containing true annotations with which to evaluate predictions")
     group.add_option('', '--forcealg', action="store_true", default=False,
-                     help="Force re-running algorithms if the output files already exist")
+            help="Force re-running algorithms if the output files already exist")
     group.add_option('', '--forcenet', action="store_true", default=False,
-                     help="Force re-building network matrix from scratch")
+            help="Force re-building network matrix from scratch")
     group.add_option('', '--verbose', action="store_true", default=False,
-                     help="Print additional info about running times and such")
+            help="Print additional info about running times and such")
     parser.add_option_group(group)
 
     return parser
@@ -115,7 +121,7 @@ def run():
         if kwargs['cross_validation_folds'] is not None:
             # run cross validation
             cross_validation.run_cv_all_goterms(alg_runners, ann_obj, folds=kwargs['cross_validation_folds'], **kwargs)
-        if kwargs['only_cv'] is False:
+        if kwargs['only_eval'] is False:
             # run algorithms in "prediction" mode 
             run_algs(alg_runners, **kwargs) 
             # if specified, write the SWSN combined network to a file

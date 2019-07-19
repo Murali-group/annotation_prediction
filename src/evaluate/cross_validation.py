@@ -14,7 +14,9 @@ except ImportError:
     pass
 
 
-def run_cv_all_goterms(alg_runners, ann_obj, folds=5, num_reps=1, cv_seed=None, **kwargs):
+def run_cv_all_goterms(
+        alg_runners, ann_obj, folds=5, num_reps=1, 
+        cv_seed=None, **kwargs):
     """
     Split the positives and negatives into folds across all GO terms
     and then run the algorithms on those folds.
