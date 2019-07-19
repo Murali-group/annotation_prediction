@@ -223,6 +223,7 @@ def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
         out_file = "%s%s-scatter.pdf" % (out_pref, measure)
         print("Writing %s" % (out_file))
         plt.savefig(out_file, bbox_inches='tight')
+    plt.close()
 
 
 def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
@@ -243,6 +244,7 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
         out_file = "%s%s-boxplot.pdf" % (out_pref, measure)
         print("Writing %s" % (out_file))
         plt.savefig(out_file, bbox_inches='tight')
+    plt.close()
 
 
 def results_overview(df, measures=['fmax']):
@@ -256,7 +258,7 @@ def results_overview(df, measures=['fmax']):
         for measure in measures:
             for alg in sorted(df_curr['Algorithm'].unique()):
                 df_alg = df_curr[df_curr['Algorithm'] == alg][measure]
-                print("\t%s: %0.3f \t\t(%d terms)" % (alg, df_alg.median(), len(df_alg)))
+                print("\t%s\t%s: %0.3f \t\t(%d terms)" % (measure, alg, df_alg.median(), len(df_alg)))
 
 
 def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str="", **kwargs):
