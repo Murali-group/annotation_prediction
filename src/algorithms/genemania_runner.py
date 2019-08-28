@@ -48,18 +48,22 @@ def setupOutputs(run_obj):
 def run(run_obj):
     """
     Function to run GeneMANIA
+    *goids_to_run*: goids for which to run the method. 
+        Must be a subset of the goids present in the ann_obj
     """
     params_results = run_obj.params_results 
     goid_scores = run_obj.goid_scores 
 
     L = run_obj.L
     alg = run_obj.name
+    run_obj.params.pop('should_run', None)  # remove the should_run parameter
+    print("Running %s with these parameters: %s" % (alg, run_obj.params))
 
     # run GeneMANIA on each GO term individually
-    for i in trange(run_obj.ann_matrix.shape[0]):
-        goid = run_obj.goids[i]
+    for goid in tqdm(run_obj.goids_to_run):
+        idx = run_obj.ann_obj.goid2idx[goid]
         # get the row corresponding to the current goids annotations 
-        y = run_obj.ann_matrix[i,:].toarray()[0]
+        y = run_obj.ann_matrix[idx,:].toarray()[0]
 
         if run_obj.net_obj.weight_gm2008 is True:
             start_time = time.process_time()
@@ -77,7 +81,9 @@ def run(run_obj):
         ## if they're different dimensions, then set the others to zeros 
         #if len(scores_arr) < goid_scores.shape[1]:
         #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
-        goid_scores[i] = scores
+        goid_scores[idx] = scores
+        # make sure 0s are removed
+        goid_scores.eliminate_zeros()
 
         # also keep track of the time it takes for each of the parameter sets
         alg_name = "%s%s" % (alg, run_obj.params_str)

@@ -34,12 +34,15 @@ class Sparse_Networks:
     """
     def __init__(self, sparse_networks, nodes, net_names=None,
                  weight_method='swsn', unweighted=False):
+        self.multi_net = False
         if isinstance(sparse_networks, list):
-            self.sparse_networks = sparse_networks
-            self.multi_net = True
+            if len(sparse_networks) > 1:
+                self.sparse_networks = sparse_networks
+                self.multi_net = True
+            else:
+                self.W = sparse_networks[0]
         else:
             self.W = sparse_networks
-            self.multi_net = False
         self.nodes = nodes
         # used to map from node/prot to the index and vice versa
         self.node2idx = {n: i for i, n in enumerate(nodes)}
@@ -83,9 +86,24 @@ class Sparse_Networks:
                 self.normalized_nets.append(_net_normalize(net))
 
     def weight_SWSN(self, ann_matrix):
-        self.W_SWSN, process_time = weight_SWSN(ann_matrix, self.normalized_nets,
-                             net_names=self.net_names, nodes=self.nodes)
+        self.W_SWSN, process_time, self.swsn_weights, self.swsn_indices = weight_SWSN(
+            ann_matrix, self.normalized_nets, net_names=self.net_names, nodes=self.nodes)
         return self.W_SWSN, process_time
+
+    def combine_using_weights(self, weights, indices=None):
+        """ Combine the different networks using the specified weights
+        *indices*: indices of the networks for which the weights apply. 
+            Must be the same length as the weights list
+        """
+        if indices is not None:
+            combined_network = weights[0]*self.sparse_networks[indices[0]]
+            for i in range(1,len(weights)):
+                combined_network += weights[i]*self.sparse_networks[indices[i]] 
+        else:
+            combined_network = weights[0]*self.sparse_networks[0]
+            for i in range(1,len(weights)):
+                combined_network += weights[i]*self.sparse_networks[i] 
+        return combined_network
 
     def weight_GM2008(self, y, goid):
         return weight_GM2008(y, self.normalized_nets, self.net_names, goid)
@@ -122,6 +140,16 @@ class Sparse_Annotations:
         self.prots = prots
         # used to map from node/prot to the index and vice versa
         self.node2idx = {n: i for i, n in enumerate(prots)}
+
+        #self.eval_ann_matrix = None 
+        #if pos_neg_file_eval is not None:
+        #    self.add_eval_ann_matrix(pos_neg_file_eval)
+
+    #def add_eval_ann_matrix(self, pos_neg_file_eval):
+    #    self.ann_matrix, self.goids, self.eval_ann_matrix = setup_eval_ann(
+    #        pos_neg_file_eval, self.ann_matrix, self.goids, self.prots)
+    #    # update the goid2idx mapping
+    #    self.goid2idx = {g: i for i, g in enumerate(self.goids)}
 
 
 #def parse_args(args):
@@ -544,15 +572,17 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
 #            num_neg += 1
     goids = []
     j = 0
-    # TODO get the GO terms from the summary matrix if they're not available here.
-    # first estimate the number of lines
-    total = 0
-    with open(pos_neg_file, 'r') as f:
-        for line in f:
-            total += 1
+    ## TODO get the GO terms from the summary matrix if they're not available here.
+    ## first estimate the number of lines
+    #total = 0
+    #with open(pos_neg_file, 'r') as f:
+    #    for line in f:
+    #        total += 1
     # read the file to build the matrix
-    with open(pos_neg_file, 'r') as f:
-        for line in tqdm(f, total=total, disable=True if total < 250 else False):
+    open_func = gzip.open if '.gz' in pos_neg_file else open
+    with open_func(pos_neg_file, 'r') as f:
+        for line in f:
+            line = line.decode() if '.gz' in pos_neg_file else line
             if line[0] == '#':
                 continue
             goid, pos_neg_assignment, curr_prots = line.rstrip().split('\t')[:3]
@@ -575,15 +605,56 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
                 goids.append(goid)
                 j += 1
 
-    print("\t%d annotations. %d positive, %d negatives" % (len(data), num_pos, num_neg))
-
     # convert it to a sparse matrix 
     print("Building a sparse matrix of annotations")
     ann_matrix = sparse.coo_matrix((data, (i_list, j_list)), shape=(len(prots), len(goids)), dtype=float).tocsr()
-    print("\t%d pos/neg annotations" % (len(ann_matrix.data)))
     ann_matrix = ann_matrix.transpose()
+    print("\t%d terms, %d prots, %d annotations. %d positives, %d negatives" % (
+        ann_matrix.shape[0], ann_matrix.shape[1], len(ann_matrix.data), num_pos, num_neg))
 
     return ann_matrix, goids
+
+
+# No longer used. the eval_ann_matrix and ann_matrix are kept separate now
+#def setup_eval_ann(pos_neg_file_eval, ann_matrix, goids, prots):
+#    """
+#    Parse the pos_neg_file_eval, and make sure the GO ID rows match between the annotation matrix and the evaluation matrix
+#    """
+#    eval_ann_matrix, eval_goids = setup_sparse_annotations(
+#        pos_neg_file_eval, set(goids), prots)
+#
+#    # If the goids are in different rows in the annotation matrix and evaluation matrix,
+#    # that will mess up the evaluation.
+#    # Make sure the terms are the same between the two matrices here
+#    num_ann_with_test = len(set(goids) & set(eval_goids))
+#    if num_ann_with_test != 0:
+#        #print(eval_goids)
+#        print("WARNING: only %d / %d goids in the annotation matrix are in the evaluation matrix" % (
+#            num_ann_with_test, len(goids)))
+#        ann_goids_without_eval = set(goids) - set(eval_goids)
+#
+#        print("\tremoving %d GO terms from the annotation matrix" % (len(ann_goids_without_eval)))
+#        goids_to_remove = []
+#        new_goids = []
+#        for i, g in enumerate(goids):
+#            if g in ann_goids_without_eval:
+#                goids_to_remove.append(i)
+#                continue
+#            new_goids.append(g)
+#        ann_matrix = delete_rows_csr(ann_matrix.tocsr(), goids_to_remove)
+#        goids = new_goids
+#
+#    # Make sure the rows match here
+#    print("\tmatching the evaluation matrix to the annotation matrix")
+#    eval_goids2idx = {g: i for i, g in enumerate(eval_goids)}
+#    # slim down the evaluation matrix to have the same GO terms as the ann matrix
+#    #matching_eval_matrix = sparse.csr_matrix(ann_matrix.shape)
+#    matching_eval_matrix = sparse.lil_matrix(ann_matrix.shape)
+#    for i, g in enumerate(tqdm(goids)):
+#        matching_eval_matrix[i] = eval_ann_matrix[eval_goids2idx[g]]
+#    eval_ann_matrix = matching_eval_matrix.tocsr()
+#    del matching_eval_matrix
+#    return ann_matrix, goids, eval_ann_matrix
 
 
 def weight_GM2008(y, normalized_nets, net_names=None, goid=None):
@@ -663,7 +734,7 @@ def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=No
         with open(net_weight_file, 'w') as out:
             out.write(''.join("%s\t%s\n" % (net_names[idx], str(alpha[i])) for i, idx in enumerate(indices)))
 
-    return combined_network, total_time
+    return combined_network, total_time, alpha, indices
 
 
 # copied from here: https://stackoverflow.com/a/26504995

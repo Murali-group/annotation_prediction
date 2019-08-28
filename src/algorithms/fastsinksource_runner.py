@@ -56,6 +56,8 @@ def setupOutputs(run_obj):
 def run(run_obj):
     """
     Function to run FastSinkSource, FastSinkSourcePlus, Local and LocalPlus
+    *goids_to_run*: goids for which to run the method. 
+        Must be a subset of the goids present in the ann_obj
     """
     params_results = run_obj.params_results 
     goid_scores = run_obj.goid_scores 
@@ -63,14 +65,15 @@ def run(run_obj):
 
     alg = run_obj.name
     params = run_obj.params
-
     print("Running %s with these parameters: %s" % (alg, params))
 
     # run FastSinkSource on each GO term individually
-    for i in trange(run_obj.ann_matrix.shape[0]):
-        goid = run_obj.goids[i]
+    #for i in trange(run_obj.ann_matrix.shape[0]):
+    #goid = run_obj.goids[i]
+    for goid in tqdm(run_obj.goids_to_run):
+        idx = run_obj.ann_obj.goid2idx[goid]
         # get the row corresponding to the current goids annotations 
-        y = run_obj.ann_matrix[i,:]
+        y = run_obj.ann_matrix[idx,:]
         positives = (y > 0).nonzero()[1]
         negatives = (y < 0).nonzero()[1]
         # if this method uses positive examples only, then remove the negative examples
@@ -102,7 +105,9 @@ def run(run_obj):
         ## if they're different dimensions, then set the others to zeros 
         #if len(scores_arr) < goid_scores.shape[1]:
         #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
-        goid_scores[i] = scores
+        goid_scores[idx] = scores
+        # make sure 0s are removed
+        goid_scores.eliminate_zeros()
 
         # also keep track of the time it takes for each of the parameter sets
         alg_name = "%s%s" % (alg, run_obj.params_str)

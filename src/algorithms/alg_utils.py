@@ -7,6 +7,7 @@ from collections import defaultdict
 import time
 from tqdm import tqdm
 import src.utils.file_utils as utils
+import gzip
 
 
 ALGORITHMS = [

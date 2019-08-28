@@ -1,52 +1,58 @@
 # Input Settings: initialize base input folder names,
-# dataset collections, and algorithms to run over
+# and dataset collections
 input_settings:
 
     # Base input directory
     input_dir: "inputs"
 
-    # Denotes a list of experiments to run, each with the folling specified:
-    #   net_version: name to give this network. Will be used to organize output files 
+    # "datasets" denotes a list of experiments to run, each with the folling specified (a * indicates required options):
+    #   *net_version: name to give this network. Will be used to organize output files 
     #
-    #   net_file: path to network file, or .mat file containing multiple networks
-    #       or a list of file names. 
-    #       multi_net must be set to True if multiple networks are to be combined
-    #       the path should be from input_dir/net_version
+    #   net_files: list of one or more network files, 
+    #       or a .mat file containing multiple networks.
+    #       multi_net must be set to True if multiple networks are to be combined.
+    #       the path should be from <input_dir>/<net_version>
     #
-    #   string_net_files: a list of full STRING files, meaning all 16, tab-delimited columns
-    #       the path should be from input_dir/net_version
+    #   string_net_files: a list of full STRING files, meaning all 16, tab-delimited columns are present
+    #       the path should be from <input_dir>/<net_version>
     #
-    #   exp_name: the name to give the experiment to run
+    #   *exp_name: the name to give the experiment to run
     #
-    #   pos_neg_file: a file containing the positive and 
-    #       negative examples for each GO term
+    #   *pos_neg_file: a 3 column, tab-delimited file with two lines per term.
+    #       Col1: term, Col2: 1 or -1 denoting positive or negative, and a comma-separated list of proteins
     #
     #   only_functions_file: a file containing the GO term IDs to run.
-    #       Not required.
+    #
+    #   taxon_file: a tab-delimited file indicating the NCBI taxononmy ID (2nd col) for each gene/UniProt ID (1st col).
+    #       Necessary to perform Leave-One-Species-Out (LOSO) evaluation.
+    #
+    #   only_taxon_file: a file containing the taxon IDs to evaluate. Also used to get the names of the species
+    #
+    #   pos_neg_file_eval: same as the pos_neg_file, only these annotations are used to evaluate.
+    #       Some use cases: temporal holdout, or recovering annotations of another evidence code
     #
     #   
     datasets:
         - net_version: "2018_06-seq-sim-e0_1"
-          net_file: "2018_06-seq-sim-e0_1-net.txt"
+          net_files: ["2018_06-seq-sim-e0_1-net.txt"]
           #string_net_files: [""]
-          exp_name: "example"
+          exp_name: "expc-bp"
           pos_neg_file: "pos-neg/expc/expc-bp.tsv"
-          only_functions_file: ""
-          # if multiple networks are present in the net file,
+          #only_functions_file: ""
+          # if passing in multiple networks or one or more 'string_net_files',
           # set multi_net to True and use these settings
           multi_net: False
           net_settings:
-              # path to the network names file from input_dir/net_version.
-              # not needed if string_net_files are passed directly
-              net_names_file: ""
-              # path to the node idx file
-              node_ids_file: ""
               # method to combine the networks. either swsn, gmw, or unweighted
               weight_method: 'swsn'
+              # if full STRING files are given, 'string_nets' and 'string_cutoff' are required
               ## either core, nontransferred, all, or a comma-separated list of the string networks, or a combination of the above. Default: all
               #string_nets: 'core'
               ## cutoff of the STRING scores. Default: 150
               #string_cutoff: 400
+              # If a .mat file is given, 'net_names_file' and 'node_ids_file' are required.
+              net_names_file: ""
+              node_ids_file: ""
 
 
 
@@ -112,4 +118,20 @@ algs:
     #    max_iters: 1000
     #    # this option isn't needed if alpha is < 1
     #    sinksourceplus_lambda: 0
+
+# Evaluation settings for CV or LOSO can be set here 
+# TODO these should probably be unique per dataset
+eval_settings:
+
+    ### LOSO parameters
+    # Don't leave out annotations when running the algorithms.
+    # Can only be used in conjunction with a pos_neg_file_eval
+    keep_ann: False
+    # Minimum number of annotations for each term in the "left-out" species to test. Default: 10
+    num_test_cutoff: 10
+    # if --pos-neg-file-eval is given and --keep-ann is False, only evaluate terms that have at least 2% of annotations.
+    # Useful to speed-up processing for term-based algorithms
+    eval_goterms_with_left_out_only: False
+    # Postfix to append to output file. Useful if running multiple in parallel. TODO figure out how to automatically combine the multiple output files
+    postfix: ""
 

@@ -1,5 +1,5 @@
 
-from optparse import OptionParser,OptionGroup
+import argparse
 import yaml
 import itertools
 from collections import defaultdict
@@ -16,7 +16,9 @@ import src.setup_sparse_networks as setup
 import src.algorithms.alg_utils as alg_utils
 import src.algorithms.runner as runner
 import src.algorithms.aptrank_birgrank.run_birgrank as run_birgrank
+import src.evaluate.eval_utils as eval_utils
 import src.evaluate.cross_validation as cross_validation
+import src.evaluate.eval_leave_one_species_out as eval_loso
 import src.utils.file_utils as utils
 import src.utils.string_utils as string_utils
 
@@ -31,11 +33,11 @@ import src.utils.string_utils as string_utils
 #        self.forced = kwargs.get('forcealg', False) 
 
 
-def parse_args(args):
+def parse_args():
     parser = setup_opts()
-    (opts, args) = parser.parse_args(args)
-    kwargs = vars(opts)
-    with open(opts.config, 'r') as conf:
+    args = parser.parse_args()
+    kwargs = vars(args)
+    with open(args.config, 'r') as conf:
         config_map = yaml.load(conf, Loader=yaml.FullLoader)
     # TODO check to make sure the inputs are correct in config_map
 
@@ -48,68 +50,71 @@ def parse_args(args):
 
 def setup_opts():
     ## Parse command line args.
-    usage = '%prog [options]\n'
-    parser = OptionParser(usage=usage)
+    parser = argparse.ArgumentParser()  #description='')
 
     # general parameters
-    group = OptionGroup(parser, 'Main Options')
-    group.add_option('','--config', type='string', default="config-files/config.yaml",
+    group = parser.add_argument_group('Main Options')
+    group.add_argument('--config', type=str, default="config-files/config.yaml",
             help="Configuration file")
-    group.add_option('-G', '--goterm', type='string', action="append",
+    group.add_argument('--goterm', '-G', type=str, action="append",
             help="Specify the GO terms to use. Can use this option multiple times")
-    parser.add_option_group(group)
 
     # evaluation parameters
-    group = OptionGroup(parser, 'Evaluation options')
-    group.add_option('', '--only-eval', action="store_true", default=False,
+    group = parser.add_argument_group('Evaluation options')
+    group.add_argument('--only-eval', action="store_true", default=False,
             help="Perform evaluation only (i.e., skip prediction mode)")
-    group.add_option('', '--loso', type='string', 
-            help="Leave-One-Species-Out evaluation. Give the path to a file containing the species designation. For each species, leave out all of its annotations " +
-            "and evaluate how well they can be recovered from the annotations of the other species. ")
-    group.add_option('-C', '--cross-validation-folds', type='int',
+    group.add_argument('--cross-validation-folds', '-C', type=int,
             help="Perform cross validation using the specified # of folds. Usually 5")
-    group.add_option('', '--num-reps', type='int', default=1,
+    group.add_argument('--num-reps', type=int, default=1,
             help="Number of times to repeat the CV process. Default=1")
-    group.add_option('', '--cv-seed', type='int', 
+    group.add_argument('--cv-seed', type=int, 
             help="Seed to use for the random number generator when splitting the annotations into folds. " + \
             "If --num-reps > 1, the seed will be incremented by 1 each time. Should only be used for testing purposes")
-    group.add_option('', '--write-prec-rec', action="store_true", default=False,
+    group.add_argument('--loso', action="store_true", default=False,
+            help="Leave-One-Species-Out evaluation. For each species, leave out all of its annotations " +
+            "and evaluate how well they can be recovered from the annotations of the other species. " +
+            "Must specify the 'taxon_file' in the config file")
+    group.add_argument('--taxon', '-T', dest="taxons", type=str, action='append',
+            help="Specify the species taxonomy ID for which to evaluate. Multiple may be specified. Otherwise, all species will be used")
+    group.add_argument('--write-prec-rec', action="store_true", default=False,
             help="Also write a file containing the precision and recall for every positive example. " + \
             "If a single term is given, only the prec-rec file, with the term in its name, will be written.")
-    group.add_option('-E', '--early-prec', type='float', action="append", 
-            help="Report the precision at the specified recall value. Can specify multiple")
-    parser.add_option_group(group)
+    group.add_argument('--early-prec', '-E', type=str, action="append", default=["k1"],
+            help="Report the precision at the specified recall value (between 0 and 1). " + \
+            "If prefixed with 'k', for a given term, the precision at (k * # ann) # of nodes is given. Default: k1")
 
     # additional parameters
-    group = OptionGroup(parser, 'Additional options')
-    group.add_option('-W', '--num-pred-to-write', type='int', default=10,
+    group = parser.add_argument_group('Additional options')
+    group.add_argument('--num-pred-to-write', '-W', type=int, default=10,
             help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
-    group.add_option('-N', '--factor-pred-to-write', type='float', 
+    group.add_argument('--factor-pred-to-write', '-N', type=float, 
             help="Write the predictions <factor>*num_pos for each term to file. " +
             "For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
     # TODO finish adding this option
-    #group.add_option('-T', '--ground-truth-file', type='string',
+    #group.add_argument('-T', '--ground-truth-file', type=str,
     #                 help="File containing true annotations with which to evaluate predictions")
-    group.add_option('', '--forcealg', action="store_true", default=False,
+    group.add_argument('--postfix', type=str, default='',
+            help="String to add to the end of the output file name(s)")
+    group.add_argument('--forcealg', action="store_true", default=False,
             help="Force re-running algorithms if the output files already exist")
-    group.add_option('', '--forcenet', action="store_true", default=False,
+    group.add_argument('--forcenet', action="store_true", default=False,
             help="Force re-building network matrix from scratch")
-    group.add_option('', '--verbose', action="store_true", default=False,
+    group.add_argument('--verbose', action="store_true", default=False,
             help="Print additional info about running times and such")
-    parser.add_option_group(group)
 
     return parser
 
 
-def run():
-    config_map, kwargs = parse_args(sys.argv)
+def run(config_map, **kwargs):
     input_settings = config_map['input_settings']
     input_dir = input_settings['input_dir']
     alg_settings = config_map['algs']
     output_settings = config_map['output_settings']
+    # combine the evaluation settings in the config file and the kwargs
+    kwargs.update(config_map['eval_settings'])
 
     for dataset in input_settings['datasets']:
-        net_obj, ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
+        net_obj, ann_obj, eval_ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
         # if there are no annotations, then skip this dataset
         if len(ann_obj.goids) == 0:
             print("No terms found. Skipping this dataset")
@@ -118,9 +123,8 @@ def run():
         # outputs/<net_version>/<exp_name>/<alg_name>/output_files
         out_dir = "%s/%s/%s/" % (output_settings['output_dir'], dataset['net_version'], dataset['exp_name'])
         alg_runners = setup_runners(alg_settings, net_obj, ann_obj, out_dir, **kwargs)
-        if kwargs['cross_validation_folds'] is not None:
-            # run cross validation
-            cross_validation.run_cv_all_goterms(alg_runners, ann_obj, folds=kwargs['cross_validation_folds'], **kwargs)
+
+        # first run prediction mode since it is the fastest
         if kwargs['only_eval'] is False:
             # run algorithms in "prediction" mode 
             run_algs(alg_runners, **kwargs) 
@@ -131,19 +135,41 @@ def run():
                 # the SWSN network is part of the runner object. Need to organize that better
                 net_obj.save_net(out_file)
 
+            # if a pos_neg_file_eval was passed in (e.g., for temporal holdout validation),
+            # use it to evaluate the predictions
+            if eval_ann_obj is not None:
+                exp_type = "eval"
+                # For LOSO, 'all-sp-loso' was used in the past
+                #if kwargs.get('keep_ann') is not None:
+                #    exp_type="all-sp-loso" 
+                for run_obj in alg_runners:
+                    out_file = "%s/%s%s%s.txt" % (
+                        run_obj.out_dir, exp_type, run_obj.params_str, kwargs.get("postfix", ""))
+                    utils.checkDir(os.path.dirname(out_file))
+                    eval_utils.evaluate_ground_truth(
+                        run_obj, eval_ann_obj, out_file, **kwargs)
+
+        if kwargs['cross_validation_folds'] is not None:
+            # run cross validation
+            cross_validation.run_cv_all_goterms(alg_runners, ann_obj, folds=kwargs['cross_validation_folds'], **kwargs)
+
+        if kwargs['loso'] is not None:
+            # add the taxon file paths for this dataset to kwargs
+            for arg in ['taxon_file', 'only_taxon_file']:
+                kwargs[arg] = "%s/%s" % (input_dir, dataset[arg]) 
+            # now run the leave-one-species-out eval
+            eval_loso.eval_loso(alg_runners, ann_obj, eval_ann_obj=eval_ann_obj, **kwargs)
+
 
 def setup_net(input_dir, dataset, **kwargs):
     # load the network matrix and protein IDs
-    net_file = None
-    if 'net_file' in dataset:
-        if not isinstance(net_file, list):
-            net_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_file'])
-        else:
-            net_file = dataset['net_file']
+    net_files = None
+    if 'net_files' in dataset:
+        net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], net_file) for net_file in dataset['net_files']]
     unweighted = dataset['net_settings'].get('unweighted', False) if 'net_settings' in dataset else False
     if dataset.get('multi_net',False) is True: 
         # if multiple file names are passed in, then map each one of them
-        if isinstance(net_file, list) or 'string_net_files' in dataset:
+        if isinstance(net_files, list) or 'string_net_files' in dataset:
             string_net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], string_net_file) for string_net_file in dataset['string_net_files']]
             string_nets = None 
             if 'string_nets' in dataset['net_settings']:
@@ -154,11 +180,12 @@ def setup_net(input_dir, dataset, **kwargs):
             out_pref = "%s/sparse-nets/c%d-" % (os.path.dirname(string_net_files[0]), string_cutoff)
             utils.checkDir(os.path.dirname(out_pref))
             sparse_nets, net_names, prots = setup.create_sparse_net_file(
-                    out_pref, net_files=net_file, string_net_files=string_net_files, 
+                    out_pref, net_files=net_files, string_net_files=string_net_files, 
                     string_nets=string_nets,
                     string_cutoff=string_cutoff,
                     forcenet=kwargs['forcenet'])
         else:
+            # if a .mat file with multiple sparse matrix networks inside of it is passed in, read that here
             net_names_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_settings']['net_names_file'])
             node_ids_file  = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_settings']['node_ids_file'])
             sparse_nets, net_names, prots = alg_utils.read_multi_net_file(net_file, net_names_file, node_ids_file)
@@ -169,7 +196,10 @@ def setup_net(input_dir, dataset, **kwargs):
             weight_method=weight_method, unweighted=unweighted,
         )
     else:
-        W, prots = alg_utils.setup_sparse_network(net_file, forced=kwargs['forcenet'])
+        if net_files is None:
+            print("ERROR: no net files specified in the config file. Must provide either 'net_files', or 'string_net_files'")
+            sys.exit()
+        W, prots = alg_utils.setup_sparse_network(net_files[0], forced=kwargs['forcenet'])
         net_obj = setup.Sparse_Networks(W, prots, unweighted=unweighted)
     return net_obj
 
@@ -184,18 +214,30 @@ def get_algs_to_run(alg_settings):
 
 
 def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
+    # setup the network matrix first
+    net_obj = setup_net(input_dir, dataset, **kwargs)
+    #ann_obj = setup_annotations(input_dir, dataset, **kwargs)
+
+    # limit the terms to whatever is specified either in the only_functions_file,
+    # or the --goterm command-line option
     only_functions_file = None
-    if 'only_functions_file' in dataset:
+    # if specific goterms are passed in_then ignore the only functions file
+    if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
         only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
     selected_goterms = alg_utils.select_goterms(
             only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
-
-    net_obj = setup_net(input_dir, dataset, **kwargs)
 
     # now build the annotation matrix
     pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
     ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_goterms, net_obj.nodes)
     ann_obj = setup.Sparse_Annotations(ann_matrix, goids, net_obj.nodes)
+
+    eval_ann_obj = None
+    # also check if a evaluation pos_neg_file was given
+    if dataset.get('pos_neg_file_eval', '') != '':
+        pos_neg_file_eval = "%s/%s" % (input_dir, dataset['pos_neg_file_eval'])
+        ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_goterms, net_obj.nodes)
+        eval_ann_obj = setup.Sparse_Annotations(ann_matrix, goids, net_obj.nodes)
 
     algs = get_algs_to_run(alg_settings)
     # this will be handled in the birgrank and aptrank runners(?)
@@ -209,7 +251,7 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
         ann_obj.pos_matrix = pos_matrix
         ann_obj.dag_goids = dag_goids
 
-    return net_obj, ann_obj
+    return net_obj, ann_obj, eval_ann_obj
 
 
 def setup_runners(alg_settings, net_obj, ann_obj, out_dir, **kwargs):
@@ -345,4 +387,5 @@ def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
 
 
 if __name__ == "__main__":
-    run()
+    config_map, kwargs = parse_args()
+    run(config_map, **kwargs)

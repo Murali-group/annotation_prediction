@@ -46,6 +46,75 @@ ALG_NAMES = {
 # and an ordering
 
 
+def setup_opts():
+    ## Parse command line args.
+    usage = '%prog [options]\n'
+    parser = OptionParser(usage=usage)
+
+    # general parameters
+    group = OptionGroup(parser, 'Main Options')
+    # TODO take multiple config files
+    group.add_option('','--config', type='string', default="config-files/config.yaml",
+                     help="Configuration file")
+    group.add_option('-A', '--alg', type='string', action="append",
+                     help="Algorithms to plot. Must be in the config file. If specified, will ignore 'should_run' in the config file")
+    group.add_option('-o', '--out-pref', type='string', 
+                     help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
+    group.add_option('-G', '--goterm', type='string', action="append",
+                     help="Specify the GO terms to use (should be in GO:00XX format)")
+    group.add_option('', '--forceplot', action='store_true', default=False,
+                     help="Force overwitting plot files if they exist. TODO not yet implemented.")
+    group.add_option('', '--exp-type', type='string', default='cv-5folds',
+                     help='Type of experiment (e.g., cv-5fold, temporal-holdout). Default: cv-5folds')
+    group.add_option('', '--num-reps', type='int', default=1,
+                     help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
+    group.add_option('', '--cv-seed', type='int', 
+                     help="Seed used when running CV")
+    group.add_option('', '--term-stats', type='string', action='append',
+                     help="File which contains the term name, # ann and other statistics such as depth. Can specify multiple")
+    group.add_option('', '--only-terms', type='string', 
+                     help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
+    group.add_option('', '--only-terms-name', type='string', default='',
+                     help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
+    parser.add_option_group(group)
+
+    # plotting parameters
+    group = OptionGroup(parser, 'Plotting Options')
+    group.add_option('', '--measure', action="append",
+                     help="Evaluation measure to use. May specify multiple. Options: 'fmax', 'avgp', 'auprc', 'auroc'. Default: 'fmax'")
+    group.add_option('', '--boxplot', action='store_true', default=False,
+                     help="Compare all runners in the config file using a boxplot")
+    group.add_option('', '--scatter', action='store_true', default=False,
+                     help="Make a scatterplot, or pair plot if more than two runners are given." +
+                     "If the # ann are given with --term-stats, then plot the fmax by the # ann")
+    group.add_option('', '--prec-rec', action='store_true', default=False,
+                     help="Make a precision recall curve for each specified term")
+    parser.add_option_group(group)
+
+    return parser
+
+
+def parse_args(args):
+    parser = setup_opts()
+    (opts, args) = parser.parse_args(args)
+    kwargs = vars(opts)
+    with open(opts.config, 'r') as conf:
+        config_map = yaml.load(conf, Loader=yaml.FullLoader)
+    # TODO check to make sure the inputs are correct in config_map
+
+    #if opts.exp_name is None or opts.pos_neg_file is None:
+    #    print("--exp-name, --pos-neg-file, required")
+    #    sys.exit(1)
+    if kwargs['measure'] is None:
+        kwargs['measure'] = ['fmax']
+    kwargs['measures'] = kwargs['measure']
+    del kwargs['measure']
+    kwargs['algs'] = kwargs['alg']
+    del kwargs['alg']
+
+    return config_map, kwargs
+
+
 def main(config_map, **kwargs):
     input_settings = config_map['input_settings']
     #input_dir = input_settings['input_dir']
@@ -251,14 +320,14 @@ def results_overview(df, measures=['fmax']):
     """
     Print an overview of the number of values / terms, as well as the median fmax
     """
+    print("exp_name\tmeasure\talg\tmedian\t# terms")
     for plot_exp_name in sorted(df['plot_exp_name'].unique()):
         df_curr = df[df['plot_exp_name'] == plot_exp_name]
-        print(plot_exp_name)
         # limit the goterms to those that are also present for SinkSource(?)
         for measure in measures:
             for alg in sorted(df_curr['Algorithm'].unique()):
                 df_alg = df_curr[df_curr['Algorithm'] == alg][measure]
-                print("\t%s\t%s: %0.3f \t\t(%d terms)" % (measure, alg, df_alg.median(), len(df_alg)))
+                print("%s\t%s\t%s\t%0.3f\t%d" % (plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
 
 
 def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str="", **kwargs):
@@ -357,75 +426,6 @@ def load_alg_results(dataset, alg, alg_params, prec_rec="", results_dir='outputs
             df['Algorithm'] = alg_name + params_str
         df_all = pd.concat([df_all, df])
     return df_all
-
-
-def parse_args(args):
-    parser = setup_opts()
-    (opts, args) = parser.parse_args(args)
-    kwargs = vars(opts)
-    with open(opts.config, 'r') as conf:
-        config_map = yaml.load(conf, Loader=yaml.FullLoader)
-    # TODO check to make sure the inputs are correct in config_map
-
-    #if opts.exp_name is None or opts.pos_neg_file is None:
-    #    print("--exp-name, --pos-neg-file, required")
-    #    sys.exit(1)
-    if kwargs['measure'] is None:
-        kwargs['measure'] = ['fmax']
-    kwargs['measures'] = kwargs['measure']
-    del kwargs['measure']
-    kwargs['algs'] = kwargs['alg']
-    del kwargs['alg']
-
-    return config_map, kwargs
-
-
-def setup_opts():
-    ## Parse command line args.
-    usage = '%prog [options]\n'
-    parser = OptionParser(usage=usage)
-
-    # general parameters
-    group = OptionGroup(parser, 'Main Options')
-    # TODO take multiple config files
-    group.add_option('','--config', type='string', default="config-files/config.yaml",
-                     help="Configuration file")
-    group.add_option('-A', '--alg', type='string', action="append",
-                     help="Algorithms to plot. Must be in the config file. If specified, will ignore 'should_run' in the config file")
-    group.add_option('-o', '--out-pref', type='string', 
-                     help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
-    group.add_option('-G', '--goterm', type='string', action="append",
-                     help="Specify the GO terms to use (should be in GO:00XX format)")
-    group.add_option('', '--forceplot', action='store_true', default=False,
-                     help="Force overwitting plot files if they exist. TODO not yet implemented.")
-    group.add_option('', '--exp-type', type='string', default='cv-5folds',
-                     help='Type of experiment (e.g., cv-5fold, temporal-holdout). Default: cv-5folds')
-    group.add_option('', '--num-reps', type='int', default=1,
-                     help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
-    group.add_option('', '--cv-seed', type='int', 
-                     help="Seed used when running CV")
-    group.add_option('', '--term-stats', type='string', action='append',
-                     help="File which contains the term name, # ann and other statistics such as depth. Can specify multiple")
-    group.add_option('', '--only-terms', type='string', 
-                     help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
-    group.add_option('', '--only-terms-name', type='string', default='',
-                     help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
-    parser.add_option_group(group)
-
-    # plotting parameters
-    group = OptionGroup(parser, 'Plotting Options')
-    group.add_option('', '--measure', action="append",
-                     help="Evaluation measure to use. May specify multiple. Options: 'fmax', 'avgp', 'auprc', 'auroc'. Default: 'fmax'")
-    group.add_option('', '--boxplot', action='store_true', default=False,
-                     help="Compare all runners in the config file using a boxplot")
-    group.add_option('', '--scatter', action='store_true', default=False,
-                     help="Make a scatterplot, or pair plot if more than two runners are given." +
-                     "If the # ann are given with --term-stats, then plot the fmax by the # ann")
-    group.add_option('', '--prec-rec', action='store_true', default=False,
-                     help="Make a precision recall curve for each specified term")
-    parser.add_option_group(group)
-
-    return parser
 
 
 if __name__ == "__main__":

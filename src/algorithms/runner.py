@@ -47,18 +47,22 @@ class Runner(object):
         self.net_obj = net_obj
         self.ann_obj = ann_obj
         self.out_dir = "%s/%s/" % (out_dir, name)
+        params.pop('should_run', None)  # remove the should_run parameter
         self.params = params
         self.kwargs = kwargs
         self.verbose = kwargs.get('verbose', False) 
         self.forced = kwargs.get('forcealg', False) 
+        # for term-based algorithms, can limit the goids for which they will be run
+        self.goids_to_run = kwargs.get('goids_to_run', ann_obj.goids)
 
         # track measures about each run (e.g., running time)
         self.params_results = defaultdict(int) 
         # store the node scores for each GO term in a sparse matrix
-        self.goid_scores = sparse.lil_matrix(ann_obj.ann_matrix.shape, dtype=np.float)
+        self.goid_scores = sparse.csr_matrix(ann_obj.ann_matrix.shape, dtype=np.float)
 
         # keep track of the weighting method for writing to the output file later
         self.setupParamsStr(net_obj.weight_str, params, name)
+
 
     # if the method is not in Python and needs to be called elsewhere, use this
     def setupInputs(self):

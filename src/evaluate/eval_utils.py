@@ -11,37 +11,38 @@ except ImportError:
 
 
 def evaluate_ground_truth(
-        goid_scores, ann_obj, out_file,
+        run_obj, eval_ann_obj, out_file,
         non_pos_as_neg_eval=False, taxon='-',
-        alg='', early_prec=None, write_prec_rec=False, 
-        append=True, **kwargs):
+        early_prec=None, write_prec_rec=False, 
+        append=False, **kwargs):
     """
     *early_prec*: A list of recall values for which to get the precision. 
         Each will get its own column in the output file
     *write_prec_rec*: For every term, write a file containing the 
         precision and recall at every positive and negative example
     """
-    true_ann_matrix = ann_obj.ann_matrix
-    goids, prots = ann_obj.goids, ann_obj.prots
+    goid_scores, goids = run_obj.goid_scores, run_obj.goids_to_run 
+    eval_ann_matrix, prots = eval_ann_obj.ann_matrix, eval_ann_obj.prots
+    score_goid2idx = run_obj.ann_obj.goid2idx
+    # only evaluate the terms that are in both the goid_scores matrix and the eval matrix
+    goids_to_eval = set(goids) & set(eval_ann_obj.goids)
+    if len(goids_to_eval) != len(goids) or len(goids_to_eval) != len(eval_ann_obj.goids):
+        print("\nWARNING: only %d goids both have scores (/%d goids) and are in the eval matrix (/%d goids)" % (
+            len(goids_to_eval), len(goids), len(eval_ann_obj.goids)))
 
-    score_goids2idx = {g: i for i, g in enumerate(goids)}
-    print("Computing fmax from ground truth of %d goterms" % (true_ann_matrix.shape[0]))
+    print("Computing fmax from ground truth for %d goterms" % (len(goids_to_eval)))
     goid_stats = {}
     goid_num_pos = {} 
     goid_prec_rec = {}
-    for i in range(true_ann_matrix.shape[0]):
-        goid = goids[i]
-        # make sure the scores are actually available first
-        #if goid not in self.goid2idx:
-        #    print("WARNING: goid %s not in initial set of %d goids" % (
-        #                        goid, len(self.goids)))
-        #    continue
+
+    for goid in goids_to_eval:
+        eval_idx = eval_ann_obj.goid2idx[goid]
         # get the row corresponding to the current goids annotations 
-        goid_ann = true_ann_matrix[i,:].toarray().flatten()
+        goid_ann = eval_ann_matrix[eval_idx,:].toarray().flatten()
         positives = np.where(goid_ann > 0)[0]
         # to get the scores, map the current goid index to the
         # index of the goid in the scores matrix
-        scores = goid_scores[score_goids2idx[goid]]
+        scores = goid_scores[score_goid2idx[goid]]
         # this is only needed for aptrank since it does not return a sparse matrix
         if sparse.issparse(scores):
             scores = scores.toarray().flatten()
@@ -76,20 +77,35 @@ def evaluate_ground_truth(
         if kwargs['verbose']:
             print("%s fmax: %0.4f" % (goid, fmax))
 
+    # compute the early precision at specified values
     early_prec_header = "" 
     early_prec_str = defaultdict(str) 
     if early_prec is not None:
         # figure out how many columns to write for early precision
-        early_prec_header = ["prec-%s-rec" % (r) for r in early_prec]
+        early_prec_header = ["eprec-rec%s" % (r) for r in early_prec]
         # for each GO term, format the output columns now.
-        for g, (prec, rec, _) in goid_prec_rec.items():
+        for g, (prec, rec, pos_neg_stats) in goid_prec_rec.items():
             early_prec_values = []
             for curr_recall in early_prec:
-                # find the first precision value >= the specified recall
-                for p, r in zip(prec, rec):
-                    if r >= curr_recall:
-                        early_prec_values.append(p)
-                        break
+                # if a k recall is specified, get the precision at the recall which is k * # ann in the left-out species
+                if 'k' in curr_recall:
+                    k_val = float(curr_recall.replace('k',''))
+                    num_nodes_to_get = k_val * goid_num_pos[g] 
+                    # the pos_neg_stats tracks the prec for every node.
+                    # So find the precision value for first node with an index >= (k * # ann)
+                    for idx, (_, _, _, _, curr_num_pos) in enumerate(pos_neg_stats): 
+                        if curr_num_pos >= num_nodes_to_get:
+                            break
+                    # get the precision at the corresponding index
+                    p = prec[idx]
+                    early_prec_values.append(p)
+                else:
+                    curr_recall = float(curr_recall)
+                    # find the first precision value where the recall is >= the specified recall
+                    for p, r in zip(prec, rec):
+                        if r >= curr_recall:
+                            early_prec_values.append(p)
+                            break
             # now format the values so they'll be ready to be written to the output file
             early_prec_str[g] = '\t'+'\t'.join("%0.4f" % (p) for p in early_prec_values)
 
@@ -99,7 +115,7 @@ def evaluate_ground_truth(
     else:
         # don't re-write the header if this file is being appended to
         if not os.path.isfile(out_file) or not append:
-            print("Writing results to %s" % (out_file))
+            print("Writing results to %s\n" % (out_file))
             with open(out_file, 'w') as out:
                 header_line = "#goid\tfmax\tavgp\tauprc\tauroc"
                 if taxon not in ['-', None]:
@@ -109,12 +125,16 @@ def evaluate_ground_truth(
                 header_line += '\t' + '\t'.join(early_prec_header)
                 out.write(header_line+"\n")
         else:
-            print("Appending results to %s" % (out_file))
-        with open(out_file, 'a') as out:
-            out.write(''.join(["%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
+            print("Appending results to %s\n" % (out_file))
+        out_str = ""
+        # sort by # ann per term
+        for g in sorted(goid_stats, key=goid_num_pos.get, reverse=True):
+            fmax, avgp, auprc, auroc = goid_stats[g]
+            out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
                 "%s\t"%taxon if taxon not in ["-", None] else "",
-                g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str[g]
-                ) for g, (fmax, avgp, auprc, auroc) in goid_stats.items()]))
+                g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str[g])
+        with open(out_file, 'a') as out:
+            out.write(out_str)
 
     if write_prec_rec:
         goid = list(goid_prec_rec.keys())[0]
@@ -124,9 +144,10 @@ def evaluate_ground_truth(
         print("writing prec/rec to %s" % (out_file_pr))
         with open(out_file_pr, 'w') as out:
             out.write("#goid\tprec\trec\tnode\tscore\tidx\tpos/neg\n")
+            #for goid, (prec, rec, pos_neg_stats) in sorted(goid_prec_rec.items(), key=goid_num_pos.get, reverse=True):
             for goid, (prec, rec, pos_neg_stats) in goid_prec_rec.items():
                 out.write(''.join(["%s\t%0.4f\t%0.4f\t%s\t%0.4f\t%d\t%d\n" % (
-                    goid, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg) in zip(prec, rec, pos_neg_stats)]))
+                    goid, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
 
 
 def compute_eval_measures(scores, positives, negatives=None, 
@@ -154,7 +175,7 @@ def compute_eval_measures(scores, positives, negatives=None,
     precision = []
     recall = []
     fpr = []
-    pos_neg_stats = []  # tuple containing the node, score and idx
+    pos_neg_stats = []  # tuple containing the node, score, idx, pos/neg assign., and the # positives assigned so far
     # TP is the # of correctly predicted positives so far
     TP = 0
     FP = 0
@@ -171,7 +192,7 @@ def compute_eval_measures(scores, positives, negatives=None,
             # fpr is the FP / FP + TN
             fpr.append((rec, FP / float(len(negatives))))
             if track_pos:
-                pos_neg_stats.append((n, scores[n], i, 1)) 
+                pos_neg_stats.append((n, scores[n], i, 1, TP+FP)) 
         elif check_negatives is False or n in negatives:
             FP += 1
             # store the prec and rec even though recall doesn't change since the AUPRC will be affected
@@ -179,7 +200,7 @@ def compute_eval_measures(scores, positives, negatives=None,
             recall.append(TP / float(len(positives)))
             fpr.append((rec, FP / float(len(negatives))))
             if track_neg:
-                pos_neg_stats.append((n, scores[n], i, -1)) 
+                pos_neg_stats.append((n, scores[n], i, -1, TP+FP)) 
         #else:
         #    continue
 
