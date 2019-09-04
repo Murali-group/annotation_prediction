@@ -113,19 +113,6 @@ def evaluate_ground_truth(
     if write_prec_rec and len(goid_prec_rec) == 1:
         print("skipping writing %s" % (out_file))
     else:
-        # don't re-write the header if this file is being appended to
-        if not os.path.isfile(out_file) or not append:
-            print("Writing results to %s\n" % (out_file))
-            with open(out_file, 'w') as out:
-                header_line = "#goid\tfmax\tavgp\tauprc\tauroc"
-                if taxon not in ['-', None]:
-                    header_line = "#taxon\t%s\t# test ann" % (header_line)
-                else:
-                    header_line += "\t# ann"
-                header_line += '\t' + '\t'.join(early_prec_header)
-                out.write(header_line+"\n")
-        else:
-            print("Appending results to %s\n" % (out_file))
         out_str = ""
         # sort by # ann per term
         for g in sorted(goid_stats, key=goid_num_pos.get, reverse=True):
@@ -133,8 +120,23 @@ def evaluate_ground_truth(
             out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
                 "%s\t"%taxon if taxon not in ["-", None] else "",
                 g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str[g])
-        with open(out_file, 'a') as out:
+        # don't re-write the header if this file is being appended to
+        if not os.path.isfile(out_file) or not append:
+            print("Writing results to %s\n" % (out_file))
+            header_line = "#goid\tfmax\tavgp\tauprc\tauroc"
+            if taxon not in ['-', None]:
+                header_line = "#taxon\t%s\t# test ann" % (header_line)
+            else:
+                header_line += "\t# ann"
+            header_line += '\t' + '\t'.join(early_prec_header)
+            out_str = header_line+"\n" + out_str
+        else:
+            print("Appending results to %s\n" % (out_file))
+        with open(out_file, 'a' if append else 'w') as out:
+            # lock it to avoid scripts trying to write at the same time
+            fcntl.flock(out, fcntl.LOCK_EX)
             out.write(out_str)
+            fcntl.flock(out, fcntl.LOCK_UN)
 
     if write_prec_rec:
         goid = list(goid_prec_rec.keys())[0]
