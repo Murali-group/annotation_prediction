@@ -31,7 +31,6 @@ def eval_loso(
     species_to_uniprot_idx = get_uniprot_species(taxon_file, ann_obj)
     selected_species, taxons = get_selected_species(species_to_uniprot_idx, only_taxon_file, taxons)
 
-    alg_taxon_terms_to_skip = defaultdict(dict)
     # change the taxons to be all. Then nothing will be left out
     if kwargs['keep_ann']:
         if eval_ann_obj is None:
@@ -44,32 +43,7 @@ def eval_loso(
     else:
         print("Running the LOSO evaluation for %d species, %d goterms" % (len(taxons), len(ann_obj.goids)))
         # -------------------------------
-        # for each alg, taxon and go term pair, see which already exist and skip them
-        for run_obj in alg_runners:
-            alg = run_obj.name
-            # define the output file path to see if it already exists
-            #exp_type="%sloso" % ("all-sp-" if kwargs['keep_ann'] else '')
-            exp_type = "loso"
-            out_file = "%s/%s%s%s.txt" % (
-                run_obj.out_dir, exp_type, run_obj.params_str, kwargs.get("postfix", ""))
-
-            if os.path.isfile(out_file) and kwargs['forcealg']:
-                print("Removing %s as results will be appended to it for each taxon" % (out_file))
-                os.remove(out_file)
-            # if the output file already exists, skip the terms that are already there
-            # unless --write-prec-rec is specified with a single term.
-            # then only the full prec_rec file will be written
-            elif kwargs['write_prec_rec'] and len(kwargs['goterm']) == 1:
-                pass
-            elif os.path.isfile(out_file): 
-                print("WARNING: %s results file already exists. Appending to it" % (out_file))
-                # check which results already exist and append to the rest
-                print("Reading results from %s " % (out_file))
-                taxon_terms_completed = utils.readColumns(out_file, 1, 2)
-                alg_taxon_terms_to_skip[alg] = {taxon: set() for taxon, term in taxon_terms_completed}
-                for taxon, term in taxon_terms_completed:
-                    alg_taxon_terms_to_skip[alg][taxon].add(term)
-                print("\t%d taxon - term pairs already finished" % (len(taxon_terms_completed)))
+        alg_taxon_terms_to_skip = get_already_run_terms(alg_runners, **kwargs) 
 
     # now perform LOSO validation
     params_results = defaultdict(int)
@@ -100,9 +74,9 @@ def eval_loso(
                 print("\t%d to run that aren't in the output file yet." % (len(sp_goterms)))
                 if len(sp_goterms) == 0:
                     continue
-
             # limit the run_obj to run on the terms for which there are annotations
             run_obj.goids_to_run = sp_goterms
+
             curr_params_results = run_and_eval_algs(
                 run_obj, ann_obj, 
                 train_ann_mat, test_ann_mat,
@@ -111,8 +85,9 @@ def eval_loso(
             for key in curr_params_results:
                 params_results[key] += curr_params_results[key]
 
-    print("Final running times:")
-    print(", ".join(["%s: %0.4f" % (key, val) for key, val in sorted(params_results.items())]))
+    print("Final running times: " + ' '.join([
+        "%s: %0.4f" % (key, val) for key, val in sorted(params_results.items())]))
+    print("")
     return params_results
 
 
@@ -145,7 +120,7 @@ def get_selected_species(species_to_uniprot_idx, only_taxon_file=None, taxons=No
             if t not in species_to_uniprot_idx:
                 print("WARNING: taxon '%s' not found. skipping" % (t))
             else:
-                found_taxons.append(taxons)
+                found_taxons.append(t)
         taxons = found_taxons
     if len(taxons) == 0:
         print("No taxon IDs found. Quitting.")
@@ -153,11 +128,46 @@ def get_selected_species(species_to_uniprot_idx, only_taxon_file=None, taxons=No
     return selected_species, taxons
 
 
+def get_already_run_terms(alg_runners, **kwargs):
+    # for each alg, taxon and go term pair, see which already exist and skip them
+    alg_taxon_terms_to_skip = defaultdict(dict)
+    for run_obj in alg_runners:
+        alg = run_obj.name
+        # define the output file path to see if it already exists
+        #exp_type="%sloso" % ("all-sp-" if kwargs['keep_ann'] else '')
+        exp_type = "loso"
+        out_file = "%s/%s%s%s.txt" % (
+            run_obj.out_dir, exp_type, run_obj.params_str, kwargs.get("postfix", ""))
+
+        if os.path.isfile(out_file) and kwargs['forcealg']:
+            print("Removing %s as results will be appended to it for each taxon" % (out_file))
+            os.remove(out_file)
+            # the ranks file is for sinksource_bounds
+            ranks_file = out_file.replace('.txt','-ranks.txt')
+            if '_bounds' in alg and os.path.isfile(ranks_file):
+                print("\tAlso removing %s" % (ranks_file))
+                os.remove(ranks_file)
+        # if the output file already exists, skip the terms that are already there
+        # unless --write-prec-rec is specified with a single term.
+        # then only the full prec_rec file will be written
+        elif kwargs['write_prec_rec'] and len(kwargs['goterm']) == 1:
+            pass
+        elif os.path.isfile(out_file): 
+            print("WARNING: %s results file already exists. Appending to it" % (out_file))
+            # check which results already exist and append to the rest
+            print("Reading results from %s " % (out_file))
+            taxon_terms_completed = utils.readColumns(out_file, 1, 2)
+            alg_taxon_terms_to_skip[alg] = {taxon: set() for taxon, term in taxon_terms_completed}
+            for taxon, term in taxon_terms_completed:
+                alg_taxon_terms_to_skip[alg][taxon].add(term)
+            print("\t%d taxon - term pairs already finished" % (len(taxon_terms_completed)))
+    return alg_taxon_terms_to_skip 
+
+
 def run_and_eval_algs(
         run_obj, ann_obj,
         train_ann_mat, test_ann_mat,
-        aptrank_data=None, taxon=None, 
-        **kwargs):
+        taxon=None, **kwargs):
     goids, prots = ann_obj.goids, ann_obj.prots
     params_results = defaultdict(int)
 
@@ -172,6 +182,24 @@ def run_and_eval_algs(
     curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, goids, prots)
     # make an ann obj with the test ann mat
     test_ann_obj = setup.Sparse_Annotations(test_ann_mat, goids, prots)
+    # if this is a gene based method, then run it on only the nodes which have a pos/neg annotation
+    # TODO make this an option
+    if run_obj.get_alg_type() == 'gene-based':
+        run_obj.kwargs['nodes_to_run'] = test_ann_mat.sum(axis=0).nonzero()[1]
+
+    # setup the output file. Could be used by the runners to write temp files or other output files
+    exp_type="loso" 
+    postfix = kwargs.get("postfix", "")
+    if kwargs['keep_ann']:
+        exp_type = "eval-per-taxon" 
+    out_file = "%s/%s%s%s.txt" % (
+        run_obj.out_dir, exp_type, run_obj.params_str, postfix)
+    run_obj.out_pref = out_file.replace('.txt','')
+    utils.checkDir(os.path.dirname(out_file))
+
+    # for sinksource_bounds, keep track of which nodes are either a left-out pos or left-out neg
+    if run_obj.name in ['sinksource_bounds', 'sinksourceplus_bounds']:
+        run_obj.params['rank_pos_neg'] = test_ann_mat
 
     # if predictions were already generated, and taxon is set to 'all', then use those.
     # otherwise, generate the prediction scores
@@ -183,19 +211,11 @@ def run_and_eval_algs(
         #alg_runners = run_eval_algs.setup_runners([alg], alg_settings, curr_ann_obj, **kwargs)
         run_obj.setupInputs()
         run_obj.run()
-        run_obj.setupOutputs()
+        run_obj.setupOutputs(taxon=taxon)
 
     # now evaluate 
     # this will write a file containing the fmax and other measures for each goterm 
     # with the taxon name in the name of the file
-    exp_type="loso" 
-    postfix = kwargs.get("postfix", "")
-    if kwargs['keep_ann']:
-        exp_type = "eval-per-taxon" 
-    out_file = "%s/%s%s%s.txt" % (
-        run_obj.out_dir, exp_type, run_obj.params_str, postfix)
-    utils.checkDir(os.path.dirname(out_file))
-
     eval_utils.evaluate_ground_truth(
         run_obj, test_ann_obj, out_file,
         #non_pos_as_neg_eval=opts.non_pos_as_neg_eval,
@@ -301,15 +321,4 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
     return train_ann_mat.tocsr(), test_ann_mat.tocsr(), sp_goterms
 
 
-#def run(args):
-    # these should be incorporated into the postfix?
-    #if opts.non_pos_as_neg_eval is False:
-    #    # use negative examples when evaluating predictions
-    #    opts.exp_name += "-use-neg" 
-    #else:
-    #    opts.exp_name += "-non-pos-neg" 
-    #if opts.oracle:
-    #    opts.exp_name += "-oracle" 
-    #if opts.keep_ann:
-    #    opts.exp_name += "-keep-ann" 
 

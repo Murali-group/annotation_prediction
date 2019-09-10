@@ -10,7 +10,7 @@ def setupInputs(run_obj):
 
     # may need to make sure the inputs match
     ## if there are more annotations than nodes in the network, then trim the extra pos/neg nodes
-    #num_nodes = self.P.shape[0] if self.weight_gm2008 is False else self.normalized_nets[0].shape[0]
+    #num_nodes = self.P.shape[0] if self.weight_gmw is False else self.normalized_nets[0].shape[0]
     #if len(self.prots) > num_nodes: 
     #    positives = positives[np.where(positives < num_nodes)]
     #    negatives = negatives[np.where(negatives < num_nodes)]
@@ -24,7 +24,7 @@ def setupInputs(run_obj):
         W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
         run_obj.L = genemania.setup_laplacian(W)
         run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
-    elif run_obj.net_obj.weight_gm2008:
+    elif run_obj.net_obj.weight_gmw:
         # this will be handled on a GO term by GO term basis
         run_obj.L = None
     else:
@@ -40,8 +40,12 @@ def setup_params_str(weight_str, params, name='genemania'):
     return params_str
 
 
+def get_alg_type():
+    return "term-based"
+
+
 # nothing to do here
-def setupOutputs(run_obj):
+def setupOutputs(run_obj, **kwargs):
     return
 
 
@@ -65,10 +69,10 @@ def run(run_obj):
         # get the row corresponding to the current goids annotations 
         y = run_obj.ann_matrix[idx,:].toarray()[0]
 
-        if run_obj.net_obj.weight_gm2008 is True:
+        if run_obj.net_obj.weight_gmw is True:
             start_time = time.process_time()
             # weight the network for each GO term individually
-            W, process_time = run_obj.net_obj.weight_GM2008(y, goid)
+            W,_,_,_ = run_obj.net_obj.weight_GMW(y, goid)
             L = genemania.setup_laplacian(W)
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 

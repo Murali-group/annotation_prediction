@@ -11,7 +11,8 @@ import numpy as np
 from scipy import sparse
 # packages in this repo
 # add this file's directory to the path so these imports work from anywhere
-sys.path.append(os.path.dirname(__file__))
+sys.path.insert(0,os.path.dirname(__file__))
+#from src import setup_sparse_networks as setup
 import src.setup_sparse_networks as setup
 import src.algorithms.alg_utils as alg_utils
 import src.algorithms.runner as runner
@@ -86,7 +87,8 @@ def setup_opts():
     # additional parameters
     group = parser.add_argument_group('Additional options')
     group.add_argument('--num-pred-to-write', '-W', type=int, default=10,
-            help="Number of predictions to write to the file. If 0, none will be written. If -1, all will be written. Default=10")
+            help="Number of predictions to write to the file for predictions mode (meaning if --only-eval isn't specified). " + \
+            "If 0, none will be written. If -1, all will be written. Default=10")
     group.add_argument('--factor-pred-to-write', '-N', type=float, 
             help="Write the predictions <factor>*num_pos for each term to file. " +
             "For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
@@ -245,10 +247,10 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
     # TODO move to birgrank/aptrank runners
     if 'birgrank' in algs or 'aptrank' in algs:
         obo_file = alg_settings['birgrank']['obo_file'][0] if 'birgrank' in algs else alg_settings['aptrank']['obo_file'][0]
-        dag_matrix, pos_matrix, dag_goids = run_birgrank.setup_h_ann_matrices(
+        # TODO get the dag matrix/matrices without using the pos_neg_file
+        dag_matrix, _, dag_goids = run_birgrank.setup_h_ann_matrices(
                 net_obj.nodes, obo_file, pos_neg_file, goterms=selected_goterms)
         ann_obj.dag_matrix = dag_matrix
-        ann_obj.pos_matrix = pos_matrix
         ann_obj.dag_goids = dag_goids
 
     return net_obj, ann_obj, eval_ann_obj
@@ -266,6 +268,9 @@ def setup_runners(alg_settings, net_obj, ann_obj, out_dir, **kwargs):
             for val in itertools.product(
                 *(params[param] for param in params))]
         for combo in combos:
+            if alg in ['birgrank', 'aptrank']:
+                kwargs['dag_matrix'] = ann_obj.dag_matrix
+                kwargs['dag_goids'] = ann_obj.dag_goids
             run_obj = runner.Runner(alg, net_obj, ann_obj, out_dir, combo, **kwargs)
             alg_runners.append(run_obj) 
 

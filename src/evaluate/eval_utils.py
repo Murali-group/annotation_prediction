@@ -2,6 +2,7 @@ import os
 import numpy as np
 from collections import defaultdict
 from scipy import sparse
+import fcntl
 # needed for evaluation metrics
 try:
     from sklearn import metrics

@@ -31,9 +31,11 @@ class Sparse_Networks:
         'swsn': Simultaneous Weighting with Specific Negatives (all terms)
         'gmw': GeneMANIA Weighting (term-by-term). Also called gm2008
     *unweighted*: set the edge weights to 1 for all given networks.
+    *term_weights*: a dictionary of tuples containing the weights and indices to use for each term.
+        Would be used instead of running 'gmw'
     """
     def __init__(self, sparse_networks, nodes, net_names=None,
-                 weight_method='swsn', unweighted=False):
+                 weight_method='swsn', unweighted=False, term_weights=None):
         self.multi_net = False
         if isinstance(sparse_networks, list):
             if len(sparse_networks) > 1:
@@ -51,18 +53,19 @@ class Sparse_Networks:
         # make sure the values are correct
         if self.multi_net is True:
             self.weight_swsn = True if weight_method.lower() == 'swsn' else False
-            self.weight_gm2008 = True if weight_method.lower() in ['gmw', 'gm2008'] else False
-            num_weight_methods = sum([self.weight_swsn, self.weight_gm2008])
+            self.weight_gmw = True if weight_method.lower() in ['gmw', 'gm2008'] else False
+            num_weight_methods = sum([self.weight_swsn, self.weight_gmw])
             if num_weight_methods == 0 or num_weight_methods > 1:
                 raise("must specify exactly one method to combine networks when multiple networks are passed in. Given method: '%s'" % (weight_method))
+            self.term_weights = term_weights
         else:
             self.weight_swsn = False
-            self.weight_gm2008 = False
+            self.weight_gmw = False
 
         # set a weight str for writing output files
         self.weight_str = '%s%s%s' % (
             '-unw' if self.unweighted else '', 
-            '-gm2008' if self.weight_gm2008 else '',
+            '-gmw' if self.weight_gmw else '',
             '-swsn' if self.weight_swsn else '')
 
         if self.unweighted is True:
@@ -105,8 +108,14 @@ class Sparse_Networks:
                 combined_network += weights[i]*self.sparse_networks[i] 
         return combined_network
 
-    def weight_GM2008(self, y, goid):
-        return weight_GM2008(y, self.normalized_nets, self.net_names, goid)
+    def weight_GMW(self, y, goid=None):
+        if self.term_weights and goid in self.term_weights:
+            weights, indices = self.term_weights[goid]
+            W = self.combine_using_weights(weights, indices)
+            process_time = 0
+        else:
+            W, process_time, weights, indices = weight_GMW(y, self.normalized_nets, self.net_names, goid=goid) 
+        return W, process_time, weights, indices
 
     def save_net(self, out_file):
         print("Writing %s" % (out_file))
@@ -657,7 +666,7 @@ def setup_sparse_annotations(pos_neg_file, goterms, prots,
 #    return ann_matrix, goids, eval_ann_matrix
 
 
-def weight_GM2008(y, normalized_nets, net_names=None, goid=None):
+def weight_GMW(y, normalized_nets, net_names=None, goid=None):
     """ TODO DOC
     """
     start_time = time.process_time()
@@ -676,7 +685,7 @@ def weight_GM2008(y, normalized_nets, net_names=None, goid=None):
     total_time = time.process_time() - start_time
 
     # don't write each goterm's combined network to a file
-    return combined_network, total_time
+    return combined_network, total_time, alphas, indices
 
 
 def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=None):

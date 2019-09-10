@@ -8,7 +8,7 @@ from tqdm import tqdm, trange
 def setupInputs(run_obj):
     # may need to make sure the inputs match
     ## if there are more annotations than nodes in the network, then trim the extra pos/neg nodes
-    #num_nodes = self.P.shape[0] if self.weight_gm2008 is False else self.normalized_nets[0].shape[0]
+    #num_nodes = self.P.shape[0] if self.weight_gmw is False else self.normalized_nets[0].shape[0]
     #if len(self.prots) > num_nodes: 
     #    positives = positives[np.where(positives < num_nodes)]
     #    negatives = negatives[np.where(negatives < num_nodes)]
@@ -22,7 +22,7 @@ def setupInputs(run_obj):
         W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
         run_obj.P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=run_obj.params.get('lambda', None))
         run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
-    elif run_obj.net_obj.weight_gm2008:
+    elif run_obj.net_obj.weight_gmw:
         # this will be handled on a GO term by GO term basis
         run_obj.P = None
     else:
@@ -44,12 +44,16 @@ def setup_params_str(weight_str, params, name="fastsinksource"):
     return params_str
 
 
+def get_alg_type():
+    return "term-based"
+
+
 def setupOutputFile(run_obj):
     return
 
 
 # nothing to do here
-def setupOutputs(run_obj):
+def setupOutputs(run_obj, **kwargs):
     return
 
 
@@ -59,12 +63,8 @@ def run(run_obj):
     *goids_to_run*: goids for which to run the method. 
         Must be a subset of the goids present in the ann_obj
     """
-    params_results = run_obj.params_results 
-    goid_scores = run_obj.goid_scores 
-    P = run_obj.P
-
-    alg = run_obj.name
-    params = run_obj.params
+    params_results, goid_scores = run_obj.params_results, run_obj.goid_scores
+    P, alg, params = run_obj.P, run_obj.name, run_obj.params
     print("Running %s with these parameters: %s" % (alg, params))
 
     # run FastSinkSource on each GO term individually
@@ -80,10 +80,10 @@ def run(run_obj):
         if alg in ["fastsinksourceplus", "sinksourceplus", "localplus"]:
             negatives = None
 
-        if run_obj.net_obj.weight_gm2008 is True:
+        if run_obj.net_obj.weight_gmw is True:
             start_time = time.process_time()
             # weight the network for each GO term individually
-            W, process_time = run_obj.net_obj.weight_GM2008(y.toarray()[0], goid)
+            W,_, _,_ = run_obj.net_obj.weight_GMW(y.toarray()[0], goid)
             P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=params.get('lambda', None))
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 

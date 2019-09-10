@@ -13,6 +13,7 @@ from collections import defaultdict
 import numpy as np
 from scipy.sparse import csr_matrix
 import src.algorithms.alg_utils as alg_utils
+import src.evaluate.eval_utils as eval_utils
 import random
 from scipy.stats import kendalltau  #, spearmanr, weightedtau
 
@@ -42,7 +43,7 @@ class SinkSourceBounds:
         self.rank_all = rank_all
         self.rank_pos_neg = rank_pos_neg
         self.ranks_to_compare = ranks_to_compare
-        self.scores_to_compare = scores_to_compare
+        #self.scores_to_compare = scores_to_compare
         self.max_iters = max_iters
         self.verbose = verbose
 
@@ -81,7 +82,7 @@ class SinkSourceBounds:
         scores_arr = np.zeros(self.num_nodes)
         indices = [self.idx2node[n] for n in range(len(all_LBs))]
         scores_arr[indices] = all_LBs
-        self.scores_to_compare = all_LBs
+        #self.scores_to_compare = all_LBs
 
         if self.verbose:
             print("SinkSourceBounds finished after %d iterations (%0.3f total sec, %0.3f sec to update)"
@@ -161,14 +162,14 @@ class SinkSourceBounds:
             max_d = (LBs - prev_LBs).max()
             prev_LBs = LBs.copy()
             UB = self.computeUBs(max_f, self.a, self.num_iters)
-            if self.scores_to_compare is not None:
-                max_d_compare_ranks = (self.scores_to_compare - LBs).max()
+            #if self.scores_to_compare is not None:
+            #    max_d_compare_ranks = (self.scores_to_compare - LBs).max()
 
             if self.verbose:
-                if self.scores_to_compare is not None:
-                    print("\t\t%0.4f sec to update scores. max_d: %0.2e, UB: %0.2e, max_d_compare_ranks: %0.2e" % (update_time, max_d, UB, max_d_compare_ranks))
-                else:
-                    print("\t\t%0.4f sec to update scores. max_d: %0.2e, UB: %0.2e" % (update_time, max_d, UB))
+                #if self.scores_to_compare is not None:
+                #    print("\t\t%0.4f sec to update scores. max_d: %0.2e, UB: %0.2e, max_d_compare_ranks: %0.2e" % (update_time, max_d, UB, max_d_compare_ranks))
+                #else:
+                print("\t\t%0.4f sec to update scores. max_d: %0.2e, UB: %0.2e" % (update_time, max_d, UB))
 
             # check to see if the set of nodes to rank have a fixed ranking
             UBs = LBs + UB
@@ -179,8 +180,8 @@ class SinkSourceBounds:
 
             self.max_unranked_stretch_list.append(max_unranked_stretch)
             self.max_d_list.append(max_d) 
-            if self.scores_to_compare is not None:
-                self.max_d_compare_ranks_list.append(max_d_compare_ranks) 
+            #if self.scores_to_compare is not None:
+            #    self.max_d_compare_ranks_list.append(max_d_compare_ranks) 
             self.UB_list.append(UB) 
             self.num_unranked_list.append(len(unranked_nodes))
             if self.ranks_to_compare is not None:
@@ -215,12 +216,12 @@ class SinkSourceBounds:
                     scores_arr = np.zeros(self.num_nodes)
                     indices = [self.idx2node[n] for n in range(len(LBs))]
                     scores_arr[indices] = LBs
-                    prec, recall, fpr = alg_utils.compute_eval_measures(scores_arr, self.rank_pos_neg[0], self.rank_pos_neg[1])
-                    fmax = alg_utils.compute_fmax(prec, recall)
-                    avgp = alg_utils.compute_avgp(prec, recall)
-                    auprc = alg_utils.compute_auprc(prec, recall)
-                    auroc = alg_utils.compute_auroc([r for r, f in fpr], [f for r, f in fpr])
-                    self.eval_stats_list.append((fmax, avgp, auprc, auroc))
+                    prec, recall, fpr = eval_utils.compute_eval_measures(scores_arr, self.rank_pos_neg[0], self.rank_pos_neg[1])
+                    fmax = eval_utils.compute_fmax(prec, recall)
+                    avgp = eval_utils.compute_avgp(prec, recall)
+                    auprc = eval_utils.compute_auprc(prec, recall)
+                    #auroc = alg_utils.compute_auroc([r for r, f in fpr], [f for r, f in fpr])
+                    self.eval_stats_list.append((fmax, avgp, auprc))
 
         self.total_time = time.process_time() - start_time
         self.total_comp += len(self.P.data)*self.num_iters
