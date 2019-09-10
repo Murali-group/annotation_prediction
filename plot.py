@@ -2,6 +2,7 @@
 import os
 import sys
 import src.plot.plot_utils as plot_utils
+import src.plot.combine_plots as combine_plots
 
 
 #def main():
@@ -10,7 +11,9 @@ import src.plot.plot_utils as plot_utils
 # had to setup the scripts this way because Python's relative imports were giving me problems
 
 if __name__ == "__main__":
-    config_map, kwargs = plot_utils.parse_args(sys.argv)
+    config_map, kwargs = plot_utils.parse_args()
 
-    plot_utils.main(config_map, **kwargs)
-    #main()
+    if config_map.get('combine_plots'):
+        combine_plots.main(config_map, **kwargs)
+    else:
+        plot_utils.main(config_map, **kwargs)
