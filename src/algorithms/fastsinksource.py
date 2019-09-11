@@ -29,18 +29,23 @@ def FastSinkSource(P, f, max_iters=1000, eps=0.0001, a=0.8, verbose=False):
         # s^(i+1) = aPs^(i) + f
         s = a*csr_matrix.dot(P, prev_s) + f
 
-        max_d = (s - prev_s).max()
-        if verbose:
-            print("\t\titer %d; %0.4f sec to update scores, max score change: %0.6e" % (iters, time.time() - update_time, max_d))
-        if max_d <= eps:
-            # converged!
-            break
-        prev_s = s.copy()
+        if eps != 0:
+            max_d = (s - prev_s).max()
+            if verbose:
+                print("\t\titer %d; %0.4f sec to update scores, max score change: %0.6e" % (iters, time.time() - update_time, max_d))
+            if max_d <= eps:
+                # converged!
+                break
+            prev_s = s.copy()
+        else:
+            prev_s = s
+            if verbose:
+                print("\t\titer %d; %0.4f sec to update scores" % (iters, time.time() - update_time))
 
     wall_time = time.time() - wall_time
     process_time = time.process_time() - process_time
     if verbose:
-        print("SinkSource converged after %d iterations (%0.3f sec, %0.3f process time)" % (iters, wall_time, process_time))
+        print("SinkSource converged after %d iterations (%0.3f wall time (sec), %0.3f process time)" % (iters, wall_time, process_time))
 
     return s, process_time, wall_time, iters
 
@@ -62,12 +67,12 @@ def runFastSinkSource(P, positives, negatives=None, max_iters=1000, eps=0.0001, 
         return np.zeros(len(num_nodes)), 0,0,0
     # remove the positive and negative nodes from the graph 
     # and setup the f vector which contains the influence from positive and negative nodes
-    P, f, node2idx, idx2node = alg_utils.setup_fixed_scores(
+    newP, f, = alg_utils.setup_fixed_scores(
         P, positives, negatives, a=a, remove_nonreachable=False)
 
     if max_iters > 0:
         s, process_time, wall_time, num_iters = FastSinkSource(
-            P, f, max_iters=max_iters, eps=eps, a=a, verbose=verbose)
+            newP, f, max_iters=max_iters, eps=eps, a=a, verbose=verbose)
     else:
         # Solve for s directly. Scipy uses the form Ax=b to solve for x
         # SinkSource equation: (I - aP)s = f
@@ -91,15 +96,17 @@ def runFastSinkSource(P, positives, negatives=None, max_iters=1000, eps=0.0001, 
                 "iters: %d, max_iters: %d" % (num_iters, 1000) if solver == 'cg' else ''))
 
     # map back from the indices after deleting pos/neg to the original indices
-    # the positives will be left as 1, and the rest of the unknown examples will get their score below
-    scores_arr = np.ones(num_nodes)
-    # leave the negative examples at 0
-    if negatives is not None:
-        scores_arr[negatives] = 0
-    indices = [idx2node[n] for n in range(len(s))]
-    scores_arr[indices] = s
+    ## the positives will be left as 1, and the rest of the unknown examples will get their score below
+    #scores_arr = np.ones(num_nodes)
+    ## leave the negative examples at 0
+    #if negatives is not None:
+    #    scores_arr[negatives] = 0
+    #indices = [idx2node[n] for n in range(len(s))]
+    #scores_arr[indices] = s
+    # keep the positive examples at 1
+    s[positives] = 1
 
-    return scores_arr, process_time, wall_time, num_iters
+    return s, process_time, wall_time, num_iters
 
 
 def runLocal(P, positives, negatives=None):

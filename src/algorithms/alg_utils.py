@@ -1,7 +1,7 @@
 
 import os, sys
 from scipy import sparse
-from scipy.sparse import csr_matrix, csgraph
+from scipy.sparse import csr_matrix, csgraph, diags
 import numpy as np
 from collections import defaultdict
 import time
@@ -299,13 +299,30 @@ def setup_fixed_scores(P, positives, negatives=None, a=1,
     # removing the fixed nodes is slightly faster than selecting the unknown rows
     # remove the fixed nodes from the graph
     fixed_nodes = np.asarray(list(fixed_nodes)) if not isinstance(fixed_nodes, np.ndarray) else fixed_nodes
-    P = delete_nodes(P, fixed_nodes)
+    #newP = delete_nodes(P, fixed_nodes)
     # and from f
-    f = np.delete(f, fixed_nodes)
+    #f = np.delete(f, fixed_nodes)
+    # UPDATE: Instead of deleting the nodes, which takes a long time for large matrices, 
+    # just set them to 0
+    newP = remove_node_edges(P, fixed_nodes)
+    f[fixed_nodes] = 0
     assert P.shape[0] == P.shape[1], "Matrix is not square"
     assert P.shape[1] == len(f), "f doesn't match size of P"
 
-    return P, f, node2idx, idx2node
+    #return P, f, node2idx, idx2node
+    return newP, f
+
+
+def remove_node_edges(W, nodes_idx):
+    nodes = np.zeros(W.shape[0])
+    nodes[nodes_idx] = 1
+    # now set all of the non-annotated prot rows and columns to 0
+    diag = diags(nodes)
+    edges_to_remove = diag.dot(W) + W.dot(diag)
+    newW = W - edges_to_remove
+    # network should be in csr form. Make sure the 0s aren't left over
+    newW.eliminate_zeros()
+    return newW
 
 
 def build_index_map(nodes, nodes_to_remove):
