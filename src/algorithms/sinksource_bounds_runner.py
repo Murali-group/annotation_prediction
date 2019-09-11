@@ -5,6 +5,7 @@ from scipy import sparse as sp
 import src.algorithms.fastsinksource_runner as fss_runner
 import src.algorithms.sinksource_bounds as ss_bounds
 import src.algorithms.alg_utils as alg_utils
+import numpy as np
 from tqdm import tqdm, trange
 import fcntl
 
@@ -88,7 +89,10 @@ def run(run_obj):
     *goids_to_run*: goids for which to run the method. 
         Must be a subset of the goids present in the ann_obj
     """
-    params_results, goid_scores = run_obj.params_results, run_obj.goid_scores
+    params_results = run_obj.params_results
+    # make sure the goid_scores matrix is reset
+    # because if it isn't empty, overwriting the stored scores seems to be time consuming
+    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     goid_rank_stats = {}
     P, alg, params = run_obj.P, run_obj.name, run_obj.params
     print("Running %s with these parameters: %s" % (alg, params))
@@ -178,7 +182,7 @@ def run(run_obj):
         #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
         goid_scores[idx] = scores_arr
         # make sure 0s are removed
-        goid_scores.eliminate_zeros()
+        #goid_scores.eliminate_zeros()
 
         # also keep track of the time it takes for each of the parameter sets
         alg_name = "%s%s" % (alg, run_obj.params_str)
@@ -186,7 +190,7 @@ def run(run_obj):
         params_results["%s_process_time"%alg_name] += process_time
         params_results["%s_update_time"%alg_name] += update_time
 
-    run_obj.goid_scores = goid_scores
+    run_obj.goid_scores = goid_scores.tocsr()
     run_obj.params_results = params_results
     run_obj.goid_rank_stats = goid_rank_stats
     return

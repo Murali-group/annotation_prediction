@@ -3,6 +3,8 @@ import time
 import src.algorithms.genemania as genemania
 import src.algorithms.alg_utils as alg_utils
 from tqdm import tqdm, trange
+from scipy import sparse as sp
+import numpy as np
 
 
 def setupInputs(run_obj):
@@ -56,11 +58,10 @@ def run(run_obj):
         Must be a subset of the goids present in the ann_obj
     """
     params_results = run_obj.params_results 
-    goid_scores = run_obj.goid_scores 
-
-    L = run_obj.L
-    alg = run_obj.name
-    run_obj.params.pop('should_run', None)  # remove the should_run parameter
+    # make sure the goid_scores matrix is reset
+    # because if it isn't empty, overwriting the stored scores seems to be time consuming
+    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
+    L, alg = run_obj.L, run_obj.name
     print("Running %s with these parameters: %s" % (alg, run_obj.params))
 
     # run GeneMANIA on each GO term individually
@@ -87,7 +88,8 @@ def run(run_obj):
         #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
         goid_scores[idx] = scores
         # make sure 0s are removed
-        goid_scores.eliminate_zeros()
+        # update: using lil matrix
+        #goid_scores.eliminate_zeros()
 
         # also keep track of the time it takes for each of the parameter sets
         alg_name = "%s%s" % (alg, run_obj.params_str)

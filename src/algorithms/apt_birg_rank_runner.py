@@ -5,6 +5,7 @@ import src.algorithms.aptrank_birgrank.birgrank as birgrank
 #import src.algorithms.aptrank_birgrank.aptrank as aptrank
 import src.algorithms.alg_utils as alg_utils
 from scipy import sparse as sp
+import numpy as np
 #from tqdm import tqdm, trange
 
 
@@ -85,7 +86,8 @@ def run(run_obj):
     """
     Function to run AptRank and BirgRank
     """
-    params_results, goid_scores = run_obj.params_results, run_obj.goid_scores
+    params_results = run_obj.params_results
+    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     P, hierarchy_mat, pos_mat = run_obj.P, run_obj.hierarchy_mat, run_obj.pos_mat
     alg, params, br_lambda = run_obj.name, run_obj.params, run_obj.params['lambda']
 
