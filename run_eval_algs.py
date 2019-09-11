@@ -155,7 +155,7 @@ def run(config_map, **kwargs):
             # run cross validation
             cross_validation.run_cv_all_goterms(alg_runners, ann_obj, folds=kwargs['cross_validation_folds'], **kwargs)
 
-        if kwargs['loso'] is not None:
+        if kwargs['loso'] is True:
             # add the taxon file paths for this dataset to kwargs
             for arg in ['taxon_file', 'only_taxon_file']:
                 kwargs[arg] = "%s/%s" % (input_dir, dataset[arg]) 
