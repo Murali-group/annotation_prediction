@@ -45,25 +45,37 @@ def main(config_map, **kwargs):
         grid_locs = plot_settings['grid_loc']
         figsize = tuple(plt_kwargs['figsize'])
         plt.figure(figsize=figsize)
-        sharey=None
+        sharex, sharey = None, None
         axes = []
 
         # create the subplots and add them
+        # TODO it would be great if I could create a figure on its own, and then add it after the fact.
+        # Doesn't look like that would be very easy though... https://stackoverflow.com/a/43859464
         for i, config_file in enumerate(plot_settings['config_files']):
             grid_loc = tuple(grid_locs[i])
             print(grid_loc, config_file)
+            if i != len(plot_settings['config_files']):
+                if plt_kwargs.get('sharex') is not None or \
+                   plt_kwargs.get('sharey') is not None:
+                    share_measure = True
+            else:
+                share_measure = False
+            print(share_measure)
             #continue
-            ax = plt.subplot2grid(grid_size, grid_loc, sharey=sharey)
+            ax = plt.subplot2grid(grid_size, grid_loc, sharex=sharex, sharey=sharey)
             curr_config_map = plot_utils.load_config_file(config_file)
-            ax = plot_utils.main(curr_config_map, ax=ax, out_pref=None, **subplot_kwargs)
+            ax = plot_utils.main(curr_config_map, ax=ax, out_pref=None, 
+                    share_measure=share_measure, **subplot_kwargs)
             if i == 0:
-                sharey = ax
+                sharex = ax if plt_kwargs.get('sharex') else sharex
+                sharey = ax if plt_kwargs.get('sharey') else sharey
             axes.append(ax)
 
         plt.tight_layout()
         # TODO add a letter to the top-left of the ax
         # now write to a file
         out_file = "%s%s.pdf" % (kwargs['out_pref'], measure)
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         plot_utils.savefig(out_file, **kwargs)
 
 

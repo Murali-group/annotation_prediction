@@ -141,6 +141,7 @@ def parse_args():
         kwargs['measure'] = ['fmax']
     kwargs['measures'] = kwargs['measure']
     del kwargs['measure']
+    kwargs['alg_names'] = ALG_NAMES
 
     return config_map, kwargs
 
@@ -149,6 +150,8 @@ def main(config_map, ax=None, out_pref='', **kwargs):
 
     input_settings, alg_settings, output_settings, out_pref, kwargs = setup_variables(
         config_map, out_pref, **kwargs)
+    print(out_pref, kwargs.get('out_pref'))
+    kwargs['out_pref'] = out_pref
 
     # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
@@ -202,11 +205,11 @@ def main(config_map, ax=None, out_pref='', **kwargs):
         # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
         for measure in kwargs['measures']:
             if kwargs['boxplot']:
-                ax = plot_boxplot(df_all, measure=measure, out_pref=out_pref, ax=ax, **kwargs)
+                ax = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
             if kwargs['scatter']:
-                ax = plot_scatter(df_all, measure=measure, out_pref=out_pref, ax=ax, **kwargs) 
+                ax = plot_scatter(df_all, measure=measure, ax=ax, **kwargs) 
             if kwargs['line']:
-                ax = plot_line(df_all, measure=measure, out_pref=out_pref, ax=ax, **kwargs)
+                ax = plot_line(df_all, measure=measure, ax=ax, **kwargs)
     return ax
 
 
@@ -227,6 +230,8 @@ def setup_variables(config_map, out_pref='', **kwargs):
         if kwargs.get('out_pref') and out_pref != '':
             del kwargs['out_pref']
             #kwargs['out_pref'] = out_pref
+        else:
+            out_pref = kwargs['out_pref']
     if kwargs.get('term_stats') is not None:
         df_stats_all = pd.DataFrame()
         for f in kwargs['term_stats']:
@@ -313,13 +318,15 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
     #print(df.head())
     #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
     ax = sns.boxplot(data=df, ax=ax,
-                     fliersize=1.5, #order=[kwargs['alg_names'][a] for a in algorithms],
+                     fliersize=1.5, order=[kwargs['alg_names'][a] for a in kwargs['algs']],
                      orient='v' if not kwargs.get('horizontal') else 'h',
-                     #palette=plt_utils.my_palette)
+                     palette=my_palette,
                 )
 
-    xlabel = measure_map.get(measure, measure.upper())
-    ylabel = kwargs.get('exp_label', '')
+    xlabel = kwargs.get('exp_label', '')
+    ylabel = measure_map.get(measure, measure.upper())
+    if kwargs['share_measure'] is True:
+        ylabel = ""
     set_labels(ax, title, xlabel, ylabel, **kwargs)
 
     if out_pref is not None:
