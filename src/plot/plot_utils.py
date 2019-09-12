@@ -1,15 +1,17 @@
 import argparse
 import yaml
 import itertools
-from collections import defaultdict
 import os
 import sys
-from tqdm import tqdm
-import time
-import numpy as np
-from scipy import sparse
+#from collections import defaultdict
+#from tqdm import tqdm
+#import time
+#import numpy as np
+#from scipy import sparse
+from scipy.stats import kruskal, mannwhitneyu
+# plotting imports
 import matplotlib
-matplotlib.use('Agg') # To save files remotely.  Must be before importing matplotlib.pyplot or pylab!
+matplotlib.use('Agg')  # To save files remotely. 
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -76,6 +78,8 @@ def setup_opts():
                      help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
     group.add_argument('--only-terms-name', type=str, default='',
                      help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
+    group.add_argument('--postfix', type=str, default='',
+                     help="Postfix to add to the end of the files")
 
     # plotting parameters
     group = parser.add_argument_group('Plotting Options')
@@ -90,6 +94,12 @@ def setup_opts():
                      "If the # ann are given with --term-stats, then plot the fmax by the # ann")
     group.add_argument('--prec-rec', action='store_true', default=False,
                      help="Make a precision recall curve for each specified term")
+
+    group = parser.add_argument_group('Parameter / Statisical Significance Options')
+    group.add_argument('--compare-param', type=str,
+                       help="name of parameter to compare (e.g., alpha)")
+    group.add_argument('--max-val', type=float,
+                       help="Maximum value of the parameter against which to compare statistical significance (e.g., 1.0 for alpha")
 
     # figure parameters
     group = parser.add_argument_group('Figure Options')
@@ -136,43 +146,10 @@ def parse_args():
 
 
 def main(config_map, ax=None, out_pref='', **kwargs):
-    input_settings = config_map['input_settings']
-    #input_dir = input_settings['input_dir']
-    alg_settings = config_map['algs']
-    output_settings = config_map['output_settings']
-    if config_map.get('eval_settings'):
-        kwargs.update(config_map['eval_settings'])
-    if config_map.get('plot_settings'):
-        #config_map['plot_settings'].update(kwargs)
-        kwargs.update(config_map['plot_settings'])
-        # overwrite whatever is in the plot settings with the specified args
-        if kwargs.get('out_pref') and out_pref != '':
-            del kwargs['out_pref']
-            #kwargs['out_pref'] = out_pref
-    if kwargs.get('term_stats') is not None:
-        df_stats_all = pd.DataFrame()
-        for f in kwargs['term_stats']:
-            df_stats = pd.read_csv(f, sep='\t')
-            df_stats_all = pd.concat([df_stats_all, df_stats])
-        kwargs['term_stats'] = df_stats_all
 
-    if out_pref == "":
-        out_pref = "%s/viz/%s/%s/" % (
-                output_settings['output_dir'], 
-                input_settings['datasets'][0]['net_version'], 
-                input_settings['datasets'][0]['exp_name'])
-    if kwargs['only_terms_file'] is not None:
-        only_terms = pd.read_csv(kwargs['only_terms_file'], sep='\t', index_col=None)
-        only_terms = only_terms.iloc[:,0].values
-        print("limitting to %d terms from %s" % (len(only_terms), kwargs['only_terms_file']))
-        kwargs['only_terms'] = only_terms
-        # setup the name to add to the output file
-        only_terms_postfix = kwargs['only_terms_name'].lower() + str(len(kwargs['only_terms'])) + '-'
-        out_pref += only_terms_postfix
+    input_settings, alg_settings, output_settings, out_pref, kwargs = setup_variables(
+        config_map, out_pref, **kwargs)
 
-    # TODO only create the output dir if plots are will be created
-    if out_pref is not None:
-        utils.checkDir(os.path.dirname(out_pref))
     # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
         # loop through all specified terms, or use an empty string if no terms were specified
@@ -233,6 +210,51 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     return ax
 
 
+def setup_variables(config_map, out_pref='', **kwargs):
+    """
+    Function to setup the various args specified in kwargs
+    """
+    input_settings = config_map['input_settings']
+    #input_dir = input_settings['input_dir']
+    alg_settings = config_map['algs']
+    output_settings = config_map['output_settings']
+    if config_map.get('eval_settings'):
+        kwargs.update(config_map['eval_settings'])
+    if config_map.get('plot_settings'):
+        #config_map['plot_settings'].update(kwargs)
+        kwargs.update(config_map['plot_settings'])
+        # overwrite whatever is in the plot settings with the specified args
+        if kwargs.get('out_pref') and out_pref != '':
+            del kwargs['out_pref']
+            #kwargs['out_pref'] = out_pref
+    if kwargs.get('term_stats') is not None:
+        df_stats_all = pd.DataFrame()
+        for f in kwargs['term_stats']:
+            df_stats = pd.read_csv(f, sep='\t')
+            df_stats_all = pd.concat([df_stats_all, df_stats])
+        kwargs['term_stats'] = df_stats_all
+
+    if out_pref == "":
+        out_pref = "%s/viz/%s/%s/" % (
+                output_settings['output_dir'], 
+                input_settings['datasets'][0]['net_version'], 
+                input_settings['datasets'][0]['exp_name'])
+    if kwargs['only_terms_file'] is not None:
+        only_terms = pd.read_csv(kwargs['only_terms_file'], sep='\t', index_col=None)
+        only_terms = only_terms.iloc[:,0].values
+        print("limitting to %d terms from %s" % (len(only_terms), kwargs['only_terms_file']))
+        kwargs['only_terms'] = only_terms
+        # setup the name to add to the output file
+        only_terms_postfix = kwargs['only_terms_name'].lower() + str(len(kwargs['only_terms'])) + '-'
+        out_pref += only_terms_postfix
+
+    # TODO only create the output dir if plots are will be created
+    if out_pref is not None:
+        utils.checkDir(os.path.dirname(out_pref))
+
+    return input_settings, alg_settings, output_settings, out_pref, kwargs
+
+
 def savefig(out_file, **kwargs):
     print("Writing %s" % (out_file))
     plt.savefig(out_file, bbox_inches='tight')
@@ -284,9 +306,16 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
 
 
 def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
-               fliersize=1.5, #order=[kwargs['alg_names'][a] for a in algorithms],
-               #palette=plt_utils.my_palette)
+    df['Algorithm'] = df['Algorithm'].astype(str)
+    df = df[['Algorithm', measure]]
+    #print(df.head())
+    df = df.pivot(columns='Algorithm', values=measure)
+    #print(df.head())
+    #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
+    ax = sns.boxplot(data=df, ax=ax,
+                     fliersize=1.5, #order=[kwargs['alg_names'][a] for a in algorithms],
+                     orient='v' if not kwargs.get('horizontal') else 'h',
+                     #palette=plt_utils.my_palette)
                 )
 
     xlabel = measure_map.get(measure, measure.upper())
@@ -452,18 +481,18 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
                     curr_exp_type = "%s-rep%s%s" % (kwargs['exp_type'], rep, 
                             "-seed%s" % (curr_seed) if curr_seed is not None else "")
                     df = load_alg_results(
-                        dataset, alg, alg_params, prec_rec=prec_rec_str,
-                        results_dir=output_settings['output_dir'], exp_type=curr_exp_type,
-                        only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
+                        dataset, alg, alg_params, prec_rec_str=prec_rec_str,
+                        results_dir=output_settings['output_dir'], **kwargs,  #exp_type=curr_exp_type,
+                        #only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
                     )
                     add_dataset_settings(dataset, df) 
                     df['rep'] = rep
                     df_all = pd.concat([df_all, df])
             else:
                 df = load_alg_results(
-                    dataset, alg, alg_params, prec_rec=prec_rec_str, 
-                    results_dir=output_settings['output_dir'], exp_type=kwargs['exp_type'],
-                    only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
+                    dataset, alg, alg_params, prec_rec_str=prec_rec_str, 
+                    results_dir=output_settings['output_dir'], **kwargs,  #exp_type=kwargs['exp_type'],
+                    #only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
                 )
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
@@ -485,12 +514,12 @@ def add_dataset_settings(dataset, df):
 
 
 def load_alg_results(
-        dataset, alg, alg_params, prec_rec="", 
+        dataset, alg, alg_params, prec_rec_str="", 
         results_dir='outputs', exp_type='cv-5folds', 
-        only_terms=None, postfix=''):
+        only_terms=None, postfix='', **kwargs):
     """
     For a given dataset and algorithm, build the file path and load the results
-    *prec_rec*: postfix to change file name. Usually 'prec-rec' if loading precision recal values
+    *prec_rec_str*: postfix to change file name. Usually 'prec-rec' if loading precision recal values
     *results_dir*: the base output directory
     *exp_type*: The string specifying the evaluation type. For example: 'cv-5folds' or 'th' for temporal holdout
     *terms*: a set of terms for which to limit the output
@@ -513,13 +542,17 @@ def load_alg_results(
     for param_combo in combos:
         # first get the parameter string for this runner
         params_str = runner.get_runner_params_str(alg, dataset, param_combo)
-        cv_file = "%s/%s/%s%s%s%s.txt" % (out_dir, alg, exp_type, params_str, postfix, prec_rec)
+        cv_file = "%s/%s/%s%s%s%s.txt" % (out_dir, alg, exp_type, params_str, postfix, prec_rec_str)
         if not os.path.isfile(cv_file):
             print("\tnot found %s - skipping" % (cv_file))
             continue
         print("\treading %s" % (cv_file))
         df = pd.read_csv(cv_file, sep='\t')
-        if len(combos) == 1: 
+        # hack to get the script to plot just the parameter value
+        if kwargs.get('compare_param') is not None:
+            df['Algorithm'] = str(param_combo[kwargs['compare_param']])
+            df['alg_name'] = alg_name
+        elif len(combos) == 1: 
             df['Algorithm'] = alg_name
         else:
             df['Algorithm'] = alg_name + params_str
