@@ -1,4 +1,4 @@
-# Squeeze Evaluations - LOSO
+# Plot results from the SinkSource Bounds compare ranks - LOSO
 
 from collections import defaultdict
 import argparse
@@ -21,7 +21,9 @@ sys.path.insert(0,fss_dir)
 from src.plot import plot_utils
 
 
-def main(config_map, ax=None, out_pref='', **kwargs):
+# TODO use the ax that was passed in
+#def main(config_map, ax=None, out_pref='', **kwargs):
+def main(config_map, out_pref='', **kwargs):
     input_settings, alg_settings, output_settings, out_pref, kwargs = plot_utils.setup_variables(
         config_map, out_pref, **kwargs)
     alg = "sinksource_bounds"
@@ -78,12 +80,16 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     plot(df_cutoffs, out_pref, alpha=alpha)
 
 
-def plot(df_cutoffs, out_pref, alpha=0.95):
-    # fig, (ax1, ax2) = plt.subplots(ncols=2)
-
+def get_axes_to_plot():
+    # TODO add subplots to a grid if passed in
     # insert a break into the plot to better show the small and large ranges
     f, (ax2, ax1) = plt.subplots(ncols=1, nrows=2, sharex=True, figsize=(5,4.5))
     plt.subplots_adjust(hspace=0.05)
+    return ax1, ax2
+
+
+def plot(df_cutoffs, out_pref, alpha=0.95):
+    ax1, ax2 = get_axes_to_plot()
     sns.boxplot(data=df_cutoffs, ax=ax1, order=["0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
     sns.boxplot(data=df_cutoffs, ax=ax2, order=["0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
     # f, ax1 = plt.subplots()
