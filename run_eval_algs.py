@@ -39,7 +39,8 @@ def parse_args():
     args = parser.parse_args()
     kwargs = vars(args)
     with open(args.config, 'r') as conf:
-        config_map = yaml.load(conf, Loader=yaml.FullLoader)
+        #config_map = yaml.load(conf, Loader=yaml.FullLoader)
+        config_map = yaml.load(conf)
     # TODO check to make sure the inputs are correct in config_map
 
     #if opts.exp_name is None or opts.pos_neg_file is None:
@@ -185,7 +186,7 @@ def setup_net(input_dir, dataset, **kwargs):
                     out_pref, net_files=net_files, string_net_files=string_net_files, 
                     string_nets=string_nets,
                     string_cutoff=string_cutoff,
-                    forcenet=kwargs['forcenet'])
+                    forcenet=kwargs.get('forcenet',False))
         else:
             # if a .mat file with multiple sparse matrix networks inside of it is passed in, read that here
             net_names_file = "%s/%s/%s" % (input_dir, dataset['net_version'], dataset['net_settings']['net_names_file'])
@@ -194,16 +195,41 @@ def setup_net(input_dir, dataset, **kwargs):
 
         weight_method = dataset['net_settings']['weight_method'].lower()
         net_obj = setup.Sparse_Networks(
-            sparse_nets, prots, net_names=net_names,
-            weight_method=weight_method, unweighted=unweighted,
+            sparse_nets, prots, net_names=net_names, weight_method=weight_method,
+            unweighted=unweighted, verbose=kwargs.get('verbose',False)
         )
     else:
         if net_files is None:
             print("ERROR: no net files specified in the config file. Must provide either 'net_files', or 'string_net_files'")
             sys.exit()
-        W, prots = alg_utils.setup_sparse_network(net_files[0], forced=kwargs['forcenet'])
-        net_obj = setup.Sparse_Networks(W, prots, unweighted=unweighted)
+        W, prots = alg_utils.setup_sparse_network(net_files[0], forced=kwargs.get('forcenet',False))
+        net_obj = setup.Sparse_Networks(
+            W, prots, unweighted=unweighted, verbose=kwargs.get('verbose',False))
     return net_obj
+
+
+def load_annotations(prots, dataset, input_dir, **kwargs):
+    # limit the terms to whatever is specified either in the only_functions_file,
+    # or the --goterm command-line option
+    only_functions_file = None
+    # if specific goterms are passed in_then ignore the only functions file
+    if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
+        only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
+    selected_goterms = alg_utils.select_goterms(
+            only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
+
+    # now build the annotation matrix
+    pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
+    ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_goterms, prots)
+    ann_obj = setup.Sparse_Annotations(ann_matrix, goids, prots)
+
+    eval_ann_obj = None
+    # also check if a evaluation pos_neg_file was given
+    if dataset.get('pos_neg_file_eval', '') != '':
+        pos_neg_file_eval = "%s/%s" % (input_dir, dataset['pos_neg_file_eval'])
+        ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_goterms, prots)
+        eval_ann_obj = setup.Sparse_Annotations(ann_matrix, goids, prots)
+    return selected_goterms, ann_obj, eval_ann_obj
 
 
 def get_algs_to_run(alg_settings):
@@ -216,30 +242,16 @@ def get_algs_to_run(alg_settings):
 
 
 def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
+    if kwargs.get('verbose'):
+        utils.print_memory_usage()
     # setup the network matrix first
     net_obj = setup_net(input_dir, dataset, **kwargs)
+    if kwargs.get('verbose'):
+        utils.print_memory_usage()
     #ann_obj = setup_annotations(input_dir, dataset, **kwargs)
-
-    # limit the terms to whatever is specified either in the only_functions_file,
-    # or the --goterm command-line option
-    only_functions_file = None
-    # if specific goterms are passed in_then ignore the only functions file
-    if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
-        only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
-    selected_goterms = alg_utils.select_goterms(
-            only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
-
-    # now build the annotation matrix
-    pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
-    ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_goterms, net_obj.nodes)
-    ann_obj = setup.Sparse_Annotations(ann_matrix, goids, net_obj.nodes)
-
-    eval_ann_obj = None
-    # also check if a evaluation pos_neg_file was given
-    if dataset.get('pos_neg_file_eval', '') != '':
-        pos_neg_file_eval = "%s/%s" % (input_dir, dataset['pos_neg_file_eval'])
-        ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_goterms, net_obj.nodes)
-        eval_ann_obj = setup.Sparse_Annotations(ann_matrix, goids, net_obj.nodes)
+    selected_goterms, ann_obj, eval_ann_obj = load_annotations(net_obj.nodes, dataset, input_dir, **kwargs)
+    if kwargs.get('verbose'):
+        utils.print_memory_usage()
 
     algs = get_algs_to_run(alg_settings)
     # this will be handled in the birgrank and aptrank runners(?)
@@ -248,6 +260,7 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
     if 'birgrank' in algs or 'aptrank' in algs:
         obo_file = alg_settings['birgrank']['obo_file'][0] if 'birgrank' in algs else alg_settings['aptrank']['obo_file'][0]
         # TODO get the dag matrix/matrices without using the pos_neg_file
+        pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
         dag_matrix, _, dag_goids = run_birgrank.setup_h_ann_matrices(
                 net_obj.nodes, obo_file, pos_neg_file, goterms=selected_goterms)
         ann_obj.dag_matrix = dag_matrix

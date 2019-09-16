@@ -299,13 +299,15 @@ def setup_fixed_scores(P, positives, negatives=None, a=1,
     # removing the fixed nodes is slightly faster than selecting the unknown rows
     # remove the fixed nodes from the graph
     fixed_nodes = np.asarray(list(fixed_nodes)) if not isinstance(fixed_nodes, np.ndarray) else fixed_nodes
-    #newP = delete_nodes(P, fixed_nodes)
-    # and from f
-    #f = np.delete(f, fixed_nodes)
-    # UPDATE: Instead of deleting the nodes, which takes a long time for large matrices, 
-    # just set them to 0
-    newP = remove_node_edges(P, fixed_nodes)
-    f[fixed_nodes] = 0
+    if remove_nonreachable is True:
+        newP = delete_nodes(P, fixed_nodes)
+        # and from f
+        f = np.delete(f, fixed_nodes)
+    else:
+        # UPDATE: Instead of deleting the nodes, which takes a long time for large matrices, 
+        # just set them to 0
+        newP = remove_node_edges(P, fixed_nodes)
+        f[fixed_nodes] = 0
     assert P.shape[0] == P.shape[1], "Matrix is not square"
     assert P.shape[1] == len(f), "f doesn't match size of P"
 
