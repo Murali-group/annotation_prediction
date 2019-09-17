@@ -7,6 +7,13 @@ import subprocess
 import sys
 
 
+def print_memory_usage():
+    # this prints the total memory usage of the machine
+    # TODO get the memory usage of this script only
+    command = "free -h | head -n 2"
+    os.system(command)
+
+
 def runCommand(command, show_output=True, quit=True, error_message=""):
     """ Small function to handle running bash subprocess
     *command*: The bash command to run on the system
