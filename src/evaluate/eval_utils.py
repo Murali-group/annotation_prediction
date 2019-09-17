@@ -157,7 +157,8 @@ def compute_eval_measures(scores, positives, negatives=None,
         track_pos=False, track_neg=False):
     """
     Compute the precision and false-positive rate at each change in recall (true-positive rate)
-    *scores*: dictionary containing a score for each node
+    *scores*: array containing a score for each node
+    *positives*: indices of positive nodes
     *negatives*: if negatives are given, then the FP will only be from the set of negatives given
     *track_pos*: if specified, track the score and rank of the positive nodes,
         and return a tuple of the node ids in order of their score, their score, their idx, and 1/-1 for pos/neg
@@ -207,7 +208,7 @@ def compute_eval_measures(scores, positives, negatives=None,
         #else:
         #    continue
 
-    # TODO how should I handle this case?
+    # TODO shouldn't happen
     if len(precision) == 0:
         precision.append(0)
         recall.append(1)
