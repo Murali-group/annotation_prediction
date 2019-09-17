@@ -54,13 +54,11 @@ def main(config_map, **kwargs):
         for i, config_file in enumerate(plot_settings['config_files']):
             grid_loc = tuple(grid_locs[i])
             print(grid_loc, config_file)
-            if i != len(plot_settings['config_files']):
+            share_measure = False
+            if i < len(plot_settings['config_files'])-1:
                 if plt_kwargs.get('sharex') is not None or \
                    plt_kwargs.get('sharey') is not None:
                     share_measure = True
-            else:
-                share_measure = False
-            print(share_measure)
             #continue
             ax = plt.subplot2grid(grid_size, grid_loc, sharex=sharex, sharey=sharey)
             curr_config_map = plot_utils.load_config_file(config_file)
