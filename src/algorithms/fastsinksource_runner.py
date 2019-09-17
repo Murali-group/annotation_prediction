@@ -71,6 +71,8 @@ def run(run_obj):
     # because if it isn't empty, overwriting the stored scores seems to be time consuming
     goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     print("Running %s with these parameters: %s" % (alg, params))
+    if len(run_obj.target_prots) != P.shape[0]:
+        print("\tstoring scores for only %d target prots" % (len(run_obj.target_prots)))
 
     # run FastSinkSource on each GO term individually
     #for i in trange(run_obj.ann_matrix.shape[0]):
@@ -110,10 +112,14 @@ def run(run_obj):
         ## if they're different dimensions, then set the others to zeros 
         #if len(scores_arr) < goid_scores.shape[1]:
         #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
+        # limit the scores to the target nodes
+        if len(run_obj.target_prots) != len(scores):
+            #print("\tstoring results for %d target prots" % (len(run_obj.target_prots)))
+            mask = np.ones(len(scores), np.bool)
+            mask[run_obj.target_prots] = 0
+            scores[mask] = 0
+        # 0s are not explicitly stored in lil matrix
         goid_scores[idx] = scores
-        # make sure 0s are removed
-        # update: using lil matrix
-        #goid_scores.eliminate_zeros()
 
         # also keep track of the time it takes for each of the parameter sets
         alg_name = "%s%s" % (alg, run_obj.params_str)

@@ -180,6 +180,11 @@ def run(run_obj):
         ## if they're different dimensions, then set the others to zeros 
         #if len(scores_arr) < goid_scores.shape[1]:
         #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
+        # limit the scores to the target nodes
+        if len(run_obj.target_prots) != len(scores):
+            mask = np.ones(len(scores), np.bool)
+            mask[run_obj.target_prots] = 0
+            scores[mask] = 0
         goid_scores[idx] = scores_arr
         # make sure 0s are removed
         #goid_scores.eliminate_zeros()

@@ -64,6 +64,7 @@ def eval_loso(
             print("\tskipping")
             continue
 
+        taxon_prots = species_to_uniprot_idx[t]
         for run_obj in alg_runners:
             alg = run_obj.name
             print("Alg: %s" % (alg))
@@ -76,6 +77,8 @@ def eval_loso(
                     continue
             # limit the run_obj to run on the terms for which there are annotations
             run_obj.goids_to_run = sp_goterms
+            # limit the scores stored to the current taxon's prots
+            run_obj.target_prots = list(taxon_prots)
 
             curr_params_results = run_and_eval_algs(
                 run_obj, ann_obj, 
@@ -85,8 +88,10 @@ def eval_loso(
             for key in curr_params_results:
                 params_results[key] += curr_params_results[key]
 
-    print("Final running times: " + ' '.join([
-        "%s: %0.4f" % (key, val) for key, val in sorted(params_results.items())]))
+    if len(params_results) != 0:
+        write_stats_file(alg_runners, params_results)
+        print("Final running times: " + ' '.join([
+            "%s: %0.4f" % (key, val) for key, val in sorted(params_results.items()) if 'time' in key]))
     print("")
     return params_results
 
@@ -147,6 +152,10 @@ def get_already_run_terms(alg_runners, **kwargs):
             if '_bounds' in alg and os.path.isfile(ranks_file):
                 print("\tAlso removing %s" % (ranks_file))
                 os.remove(ranks_file)
+            stats_file = out_file.replace('.txt','-stats.txt')
+            if os.path.isfile(stats_file):
+                print("\tAlso removing %s" % (stats_file))
+                os.remove(stats_file)
         # if the output file already exists, skip the terms that are already there
         # unless --write-prec-rec is specified with a single term.
         # then only the full prec_rec file will be written
@@ -209,8 +218,14 @@ def run_and_eval_algs(
         # replace the ann_obj in the runner with the current training annotations  
         run_obj.ann_obj = curr_ann_obj
         #alg_runners = run_eval_algs.setup_runners([alg], alg_settings, curr_ann_obj, **kwargs)
+        if kwargs.get('verbose'):
+            utils.print_memory_usage()
         run_obj.setupInputs()
+        if kwargs.get('verbose'):
+            utils.print_memory_usage()
         run_obj.run()
+        if kwargs.get('verbose'):
+            utils.print_memory_usage()
         run_obj.setupOutputs(taxon=taxon)
 
     # now evaluate 
@@ -320,5 +335,17 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
 
     return train_ann_mat.tocsr(), test_ann_mat.tocsr(), sp_goterms
 
+
+def write_stats_file(alg_runners, params_results, **kwargs):
+    # for each alg, write the params_results
+    # if --forcealg was set, then thsi will be overwritten. Otherwise, append to it
+    for run_obj in alg_runners:
+        if run_obj.out_pref is None:
+            continue
+        out_file = "%s-stats.txt" % (run_obj.out_pref)
+        print("Writing stats to %s" % (out_file))
+        # first write the date, then the stats of this run. 
+        with open(out_file, 'a') as out:
+            out.write("".join("%s\t%s\n" % (key, val) for key,val in sorted(params_results.items())))
 
 

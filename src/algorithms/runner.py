@@ -61,6 +61,8 @@ class Runner(object):
         self.forced = kwargs.get('forcealg', False) 
         # for term-based algorithms, can limit the goids for which they will be run
         self.goids_to_run = kwargs.get('goids_to_run', ann_obj.goids)
+        # also can limit the nodes for which scores are stored with this
+        self.target_prots = kwargs.get('target_nodes', np.arange(len(ann_obj.prots)))
 
         # track measures about each run (e.g., running time)
         self.params_results = defaultdict(int) 
