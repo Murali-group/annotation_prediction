@@ -47,7 +47,8 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     df = df_all
     # also get the annotation matrix
     dataset, in_dir = input_settings['datasets'][0], input_settings['input_dir']
-    ann_obj, eval_ann_obj = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
+    ann_obj, eval_ann_obj, goid_names_file = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
+    kwargs['goid_names_file'] = goid_names_file
     # if eval_ann_obj is specified, then use it to get stats instead of the ann_obj
     curr_ann_obj = eval_ann_obj if eval_ann_obj is not None else ann_obj
     # get the # ann per species
@@ -56,7 +57,9 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     species_to_uniprot_idx = eval_loso.get_uniprot_species(taxon_file, ann_obj)
     selected_species, taxons = eval_loso.get_selected_species(
         species_to_uniprot_idx, only_taxon_file, kwargs.get('taxons'))
-    kwargs['species_names'] = selected_species
+    kwargs['sp_names'] = selected_species
+    kwargs['sp_abbrv'] = {t: ''.join(
+        subs[0] for subs in sp_name.split(' ')[:2]) for t, sp_name in selected_species.items()}
     taxon_num_ann = get_taxon_ann_counts(curr_ann_obj, species_to_uniprot_idx, taxons, **kwargs)
     pos_mat = (ann_obj.ann_matrix > 0).astype(int)
     goid_num_ann = {ann_obj.goids[i]: num for i, num in enumerate(np.ravel(pos_mat.sum(axis=1)))}
@@ -91,6 +94,12 @@ def main(config_map, ax=None, out_pref='', **kwargs):
 def load_annotations(dataset, input_dir, alg_settings, **kwargs):
     # TODO don't need to load the net_obj
     _, ann_obj, eval_ann_obj = run_eval_algs.setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
+
+    pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
+    # pos-neg-bp-10-list.tsv
+    goid_names_file = pos_neg_file.replace("bp-",'').replace("-list","-summary-stats")
+    #summary_file = "inputs/pos-neg/%s/pos-neg-10-summary-stats.tsv" % (curr_ev_codes)
+    #kwargs['goid_names_file'] =  goid_names_file
     # if there are no annotations, then skip this dataset
     if len(ann_obj.goids) == 0:
         print("No annotations found. Quitting")
@@ -106,7 +115,7 @@ def load_annotations(dataset, input_dir, alg_settings, **kwargs):
 #        ann_obj = experiments.youngs_neg(ann_obj, obo_file, "%s/%s" % (input_dir,dataset['pos_neg_file']))
 #        if eval_ann_obj is not None:
 #            eval_ann_obj = experiments.youngs_neg(eval_ann_obj, obo_file, "%s/%s" % (input_dir,dataset['pos_neg_file']))
-    return ann_obj, eval_ann_obj
+    return ann_obj, eval_ann_obj, goid_names_file
 
 
 def get_taxon_ann_counts(ann_obj, species_to_uniprot_idx, taxons, **kwargs):
@@ -151,21 +160,20 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
     for measure in measures:
         print("Creating plots for '%s'" % (measure))
 
-        #out_file = "%s%d-%d-%s-%s%s-%s%s%s.pdf" % (
-                #out_pref, cutoff1, cutoff2, h, len(kwargs['algorithm']), kwargs['pos_neg_str'], measure, weight_str, kwargs['postfix'])
         out_file = "%sloso-%s-%dalgs%s.pdf" % (
-                out_pref, measure, df['Algorithm'].nunique(), kwargs['postfix'])
-        plot_fmax_eval(df, out_file, measure=measure, #title=title,
-                sort_taxon_by_fmax=sort_taxon_by_fmax, ann_stats=taxon_num_ann, **kwargs)
-
-        out_file = out_file.replace('.pdf', '-sig.txt')
+                out_pref, measure, df['Algorithm'].nunique(), kwargs.get('plot_postfix',''))
+        stat_file = out_file.replace('.pdf', '-sig.txt')
         # also get comparative p-values
-        sig_results = eval_stat_sig(df, out_file, measure=measure, sort_taxon_by_fmax=sort_taxon_by_fmax, **kwargs)
+        sig_results, sig_species = eval_stat_sig(df, stat_file, measure=measure, sort_taxon_by_fmax=sort_taxon_by_fmax, **kwargs)
+
+        plot_fmax_eval(df, out_file, measure=measure, #title=title,
+                sort_taxon_by_fmax=sort_taxon_by_fmax, ann_stats=taxon_num_ann, 
+                sig_species=sig_species, **kwargs)
 
         # also write them to a file
         #out_dir_stats = "%s/stats/" % (out_pref)
         out_file = "%s/stats/loso-%s-%s-%s%s.pdf" % (
-                out_pref, measure, kwargs['alg1'], kwargs['alg2'], kwargs['postfix'])
+                out_pref, measure, kwargs['alg1'], kwargs['alg2'], kwargs.get('plot_postfix',''))
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         scatterplot_fmax(df, goid_num_ann, measure=measure, 
                 out_file=out_file, **kwargs)
@@ -194,7 +202,7 @@ def eval_stat_sig(
     out_str += "Species\tAlg1\tAlg2\tAlg1-med\tAlg2-med\tRaw p-value\tCorrected p-value (x%d)\n" % (len(curr_species))
     for s in curr_species:
         #name = f_settings.NAME_TO_SHORTNAME2.get(selected_species[str(s)],'-')
-        name = kwargs['species_names'].get(str(s),'-') if 'species_names' in kwargs else '-'
+        name = kwargs['sp_names'].get(str(s),'-') if 'sp_names' in kwargs else '-'
         df_s = df_curr[df_curr['#taxon'] == s]
         a1_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg1, alg1)][measure]
         a2_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg2, alg2)][measure]
@@ -216,17 +224,17 @@ def eval_stat_sig(
     print(out_str)
 
     # now check how many are significant
-    num_sig = 0
+    sig_species = set()
     for s, pval in sp_pval.items():
         if pval*len(curr_species) < 0.05:
-            num_sig += 1
-    print("\t%d species with pval*%d < 0.05" % (num_sig, len(curr_species)))
-    return sp_pval
+            sig_species.add(s)
+    print("\t%d species with pval*%d < 0.05" % (len(sig_species), len(curr_species)))
+    return sp_pval, sig_species
 
 
 def plot_fmax_eval(
     df_curr, out_file, measure='fmax', 
-    sort_taxon_by_fmax=None, ann_stats=None, **kwargs):
+    sort_taxon_by_fmax=None, ann_stats=None, sig_species=None, **kwargs):
     """
     *ann_stats*: Set of annotation types (either 'EXP', 'COMP' or 'IEA') for which a boxplot will be added to the right # of annotations
     *for_pub*: If true, the title at the top will not be included
@@ -240,8 +248,7 @@ def plot_fmax_eval(
     # add the species name to the boxplot
     species_labels = {}
     for s in df_curr['#taxon']:
-        # the latex isn't working
-        species = kwargs['sp_abbrv'].get(s,s) if 'sp_abbrv' in kwargs else s
+        species = kwargs['sp_abbrv'].get(str(s),s) if 'sp_abbrv' in kwargs else s
         species_labels[s] = "%s. (%d)" % (
             species, df_curr[df_curr['#taxon'] == s]['#goid'].nunique())
     species_labels = pd.Series(species_labels)
@@ -269,16 +276,20 @@ def plot_fmax_eval(
                hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
                 data=df_curr, orient='h', fliersize=1.5,
                palette=plot_utils.my_palette)
-    plt.title(kwargs['title'])
-    plt.xlabel(xlabel, fontsize=12, weight="bold")
-    plt.ylabel(ylabel, fontsize=12, weight="bold")
-    # didn't work
-#         locs, labels = plt.yticks()
-#         plt.yticks(locs, [r'%s'%l for l in sort_by_med_fmax])
-#         plt.legend(bbox_to_anchor=(1.2, 1.2))
-    plt.legend(bbox_to_anchor=(.45, 1.0))
+    ax.set_title(kwargs['title'])
+    ax.set_xlabel(xlabel, fontsize=12, weight="bold")
+    ax.set_ylabel(ylabel, fontsize=12, weight="bold")
+    # now try and bold the yticklabels 
+    yticklabels = [item.get_text() for item in ax.get_yticklabels()]
+    for i, s in enumerate(df_curr.sort_values(by='#taxon')['#taxon'].unique()):
+        # if this is not a significant species, then add latex to make it not bold
+        if s not in sig_species:
+            yticklabels[i] = r"$\rm %s$" % (yticklabels[i]) 
+    ax.set_yticklabels(yticklabels, fontweight="bold")
+    plt.legend(bbox_to_anchor=(.3, 0.9))
     ticks = np.arange(0,1.01,.1)
     plt.setp(ax, xticks=ticks, xticklabels=["%0.1f"%x for x in ticks])
+
     if ann_stats is not None:
         # add another plot to the right that is a bar plot of the # of non-iea (or exp) annotations
         right_ax = plt.axes([.95, .13, .2, .75])

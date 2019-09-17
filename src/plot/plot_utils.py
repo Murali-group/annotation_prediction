@@ -6,7 +6,7 @@ import sys
 #from collections import defaultdict
 #from tqdm import tqdm
 #import time
-#import numpy as np
+import numpy as np
 #from scipy import sparse
 from scipy.stats import kruskal, mannwhitneyu
 # plotting imports
@@ -38,16 +38,19 @@ import src.evaluate.eval_utils as eval_utils
 ALG_NAMES = {
     'localplus': 'Local', 'local': 'Local-',
     'sinksource': 'SinkSource', 'sinksourceplus': 'SinkSource+',
+    'sinksource_bounds': 'SinkSource_Bounds',
     'fastsinksource': 'FSS', 'fastsinksourceplus': 'FSS+',
     'genemania': 'GeneMANIA',  
     'birgrank': 'BirgRank', 'aptrank': 'AptRank OneWay',
     }
 
 measure_map = {'fmax': r'F$_{\mathrm{max}}$'}
+param_map = {'alpha': r'$\rm \alpha$'}
+#param_map = {'alpha': r'$\mathbf{\mathrm{\alpha}}$'}
 
 # tried to be fancy :P
 # colors: https://coolors.co/ef6e4a-0ec9aa-7c9299-5d88d3-96bd33
-my_palette = ["#EF6E4A", "#0EC9AA", "#7C9299", "#5D88D3", "#96BD33", "#937860", "#efd2b8"]
+my_palette = ["#EF6E4A", "#0EC9AA", "#7C9299", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
 # for comparing sinksource with local
 #my_palette = ["#EF6E4A", sns.xkcd_rgb["deep sky blue"], "#96BD33", "#937860", "#efd2b8"]
 #my_palette = [sns.xkcd_rgb["orange"], sns.xkcd_rgb["azure"], "#96BD33", "#937860", "#efd2b8"]
@@ -98,8 +101,11 @@ def setup_opts():
     group = parser.add_argument_group('Parameter / Statisical Significance Options')
     group.add_argument('--compare-param', type=str,
                        help="name of parameter to compare (e.g., alpha)")
-    group.add_argument('--max-val', type=float,
+    group.add_argument('--max-val', type=str,
                        help="Maximum value of the parameter against which to compare statistical significance (e.g., 1.0 for alpha")
+    # shouldn't be needed. Just don't specify any plotting options (e.g., --boxplot)
+    #group.add_argument('--stats-only', type=float,
+    #                   help="Maximum value of the parameter against which to compare statistical significance (e.g., 1.0 for alpha")
 
     # figure parameters
     group = parser.add_argument_group('Figure Options')
@@ -115,6 +121,8 @@ def setup_opts():
     group.add_argument('--term-stats', type=str, action='append',
                      help="File which contains the term name, # ann and other statistics such as depth. " +
                      "Useful to add info to title of prec-rec plot. Can specify multiple")
+    group.add_argument('--plot-postfix', type=str, default='',
+                     help="Postfix to add to the end of the figure files")
     group.add_argument('--forceplot', action='store_true', default=False,
                      help="Force overwitting plot files if they exist. TODO not yet implemented.")
 
@@ -150,7 +158,6 @@ def main(config_map, ax=None, out_pref='', **kwargs):
 
     input_settings, alg_settings, output_settings, out_pref, kwargs = setup_variables(
         config_map, out_pref, **kwargs)
-    print(out_pref, kwargs.get('out_pref'))
     kwargs['out_pref'] = out_pref
 
     # plot prec-rec separately from everything else
@@ -163,7 +170,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             #kwargs['prec_rec'] = prec_rec
             df_all = load_all_results(input_settings, alg_settings, output_settings, prec_rec_str=prec_rec, **kwargs)
             if len(df_all) == 0:
-                print("no terms found. Quitting")
+                print("no results found. Quitting")
                 sys.exit()
             # limit to the specified terms
             if kwargs['only_terms'] is not None:
@@ -185,14 +192,13 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             sp_taxon_pairs = df_all['#taxon'].astype(str) + df_all['#goid']
             num_terms = sp_taxon_pairs.nunique()
             #num_terms = df_all.groupby(['#taxon', '#goid']).size()
-            print(num_terms)
         algs = df_all['Algorithm'].unique()
 
         print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
         #print(df_all.head())
         results_overview(df_all, measures=kwargs['measures'])
 
-        if kwargs.get('title'):
+        if kwargs.get('title') is not None:
             title = kwargs['title']
         else:
             title = '-'.join(df_all['plot_exp_name'].unique())
@@ -201,9 +207,13 @@ def main(config_map, ax=None, out_pref='', **kwargs):
                     num_terms, ' %s'%kwargs.get('only_terms_name', ''),
                     "sp-term pairs" if kwargs['exp_type'] == 'loso' else 'terms')
         kwargs['title'] = title
+        kwargs['alg_params'] = alg_settings
 
         # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
         for measure in kwargs['measures']:
+            # also check the statistical significance options
+            if kwargs['compare_param'] and kwargs['max_val']:
+                compute_param_stat_sig(df_all, measure=measure, **kwargs)
             if kwargs['boxplot']:
                 ax = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
             if kwargs['scatter']:
@@ -230,7 +240,7 @@ def setup_variables(config_map, out_pref='', **kwargs):
         if kwargs.get('out_pref') and out_pref != '':
             del kwargs['out_pref']
             #kwargs['out_pref'] = out_pref
-        else:
+        elif kwargs.get('out_pref'):
             out_pref = kwargs['out_pref']
     if kwargs.get('term_stats') is not None:
         df_stats_all = pd.DataFrame()
@@ -255,6 +265,7 @@ def setup_variables(config_map, out_pref='', **kwargs):
 
     # TODO only create the output dir if plots are will be created
     if out_pref is not None:
+        out_pref += kwargs.get('postfix','')
         utils.checkDir(os.path.dirname(out_pref))
 
     return input_settings, alg_settings, output_settings, out_pref, kwargs
@@ -287,14 +298,19 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
     x,y = measure, 'plot_exp_name'
     # flip the x and y axis if specified
     x,y = (y,x) if kwargs.get('horizontal') else (x,y)
-        
+    #print(df.columns)
+    df = df[[x,y, 'Algorithm']]
+    #print(df.head())
+    #df = df.pivot(columns='Algorithm', values=[x,y])
+    #print(df.head())
+
     # doesn't work for categorical data
     #sns.lineplot(x=measure, y='pen-alg', data=df, ax=ax,
-    ax = sns.pointplot(x=x, y=y, data=df, ax=ax,
-            hue='Algorithm', ci=None,
-            markers=markers,
-               #order=[kwargs['alg_names'][a] for a in algorithms],
-            palette=my_palette,
+    ax = sns.pointplot(
+        x=x, y=y, data=df, hue='Algorithm', estimator=np.median, ci=None,
+        #data=df, hue='Algorithm', estimator=np.median, ci=None,
+        ax=ax, markers=markers,  # order=[kwargs['alg_names'][a] for a in algorithms],
+        palette=my_palette,
                 )
     plt.setp(ax.lines,linewidth=1)  # set lw for all lines of g axes
     if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[-1]) > 20:
@@ -317,15 +333,27 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
     df = df.pivot(columns='Algorithm', values=measure)
     #print(df.head())
     #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
+    order = [kwargs['alg_names'][a] for a in kwargs['algs']]
+    if kwargs.get('compare_param'):
+        # we're not ordering the algorithms, but the parameters
+        order = []
+        for alg in kwargs['algs']:
+            order += [str(p) for p in kwargs['alg_params'][alg][kwargs['compare_param']]]
+
     ax = sns.boxplot(data=df, ax=ax,
-                     fliersize=1.5, order=[kwargs['alg_names'][a] for a in kwargs['algs']],
+                     fliersize=1.5, order=order,
                      orient='v' if not kwargs.get('horizontal') else 'h',
-                     palette=my_palette,
+                     palette=my_palette if 'palette' not in kwargs else kwargs['palette'],
                 )
 
-    xlabel = kwargs.get('exp_label', '')
+    xlabel = ""
+    if 'exp_label' in kwargs:
+        xlabel = kwargs['exp_label']
+    elif 'compare_param' in kwargs:
+        xlabel = param_map.get(kwargs['compare_param'],kwargs['compare_param'])
     ylabel = measure_map.get(measure, measure.upper())
-    if kwargs['share_measure'] is True:
+    # for some reason sharex/sharey wasn't working, so I just removed the label
+    if kwargs.get('share_measure') is True:
         ylabel = ""
     set_labels(ax, title, xlabel, ylabel, **kwargs)
 
@@ -435,6 +463,68 @@ def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
     if out_pref is not None:
         out_file = "%s%s-scatter.pdf" % (out_pref, measure)
         savefig(out_file, **kwargs)
+
+
+def compute_param_stat_sig(df, measure='fmax', **kwargs):
+    compare_param, max_val = kwargs['compare_param'], str(kwargs['max_val'])
+    # 'Algorithm' is actually holding the parameter value
+    param_col = 'Algorithm'
+    alg_params = kwargs['alg_params']
+    out_file = "%s%s-pvals.tsv" % (kwargs['out_pref'], measure)
+    out_str = "#alg\t%s\t%s-2\t2-median fmax\tpval\tmedian of differences\n" % (compare_param, compare_param)
+    if kwargs['forceplot'] or not os.path.isfile(out_file):
+        params_list = []
+        params_alg = {}
+        for alg in kwargs['algs']:
+            params_list += [str(p) for p in alg_params[alg][compare_param]]
+            # also get which alg the parameter value came from
+            params_alg.update({str(p):alg for p in alg_params[alg][compare_param]})
+
+        #for param, df_param in df.groupby('Algorithm'):
+        max_param_vals = df[df[param_col] == max_val][measure].dropna().values
+        for p in params_list:
+            #if p == max_val:
+            #    continue
+            param_vals = df[df[param_col] == p][measure].dropna().values
+            if len(max_param_vals) != len(param_vals):
+                print("ERROR: # terms doesn't match exactly for %s vs %s:" % (max_val, p))
+                print(len(max_param_vals), len(param_vals))
+                sys.exit("quitting")
+            test_statistic, pval = mannwhitneyu(max_param_vals, param_vals, alternative='greater') 
+            out_str += "%s\t%s\t%s\t%0.3f\t%0.3e\t%0.3e\n" % (
+                params_alg[p], max_val, p, np.median(param_vals),
+                pval, np.median(max_param_vals - param_vals))
+                    #np.median(max_param_vals - param_vals) if len(max_param_vals) == len(param_vals) else -1)
+
+        print("writing to %s" % (out_file))
+        with open(out_file, 'w') as out:
+            out.write(out_str)
+        print(out_str)
+    else:
+        print("%s already exists. Use --forceplot to overwrite. Skipping" % (out_file))
+# backup from before
+#def compute_stats(df_fmax, params_list, stat_file, alg='sinksource', exp_type='alpha', forced=False, compare_to=None):
+#    if forced or not os.path.isfile(stat_file):
+#        if compare_to is None:
+#            alg1 = max(params_list)
+#            if exp_type == "maxi-alpha":
+#                alg1 = "a1.0-1000" 
+#        else:
+#            alg1 = compare_to
+#        alpha_1 = df_fmax[alg1].dropna().values
+#        out_str = "#alg\t%s\t%s-2\t2-median fmax\tpval\tmedian of differences\n" % (exp_type, exp_type)
+#        # for a in params_list[:-1]:
+#        for a in params_list:
+#            fmax_a = df_fmax[a].dropna().values
+#            test_statistic, pval = mannwhitneyu(alpha_1, fmax_a, alternative='greater') 
+#            out_str += "%s\t%s\t%s\t%0.3f\t%0.3e\t%0.3e\n" % (alg, max(params_list), str(a), np.median(fmax_a), pval, 
+#                    np.median(alpha_1 - fmax_a) if len(alpha_1) == len(fmax_a) else -1)
+#        print("appending to %s" % (stat_file))
+#        with open(stat_file, 'w') as out:
+#            out.write(out_str)
+#        print(out_str)
+#    else:
+#        print("%s already exists. Skipping" % (stat_file))
 
 
 def results_overview(df, measures=['fmax']):
