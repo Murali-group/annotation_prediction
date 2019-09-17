@@ -3,6 +3,7 @@
 # also used for weighting the networks with the
 # Simultaneous Weight with Specific Negatives (SWSN) method
 
+from collections import defaultdict
 import os, sys, time
 from optparse import OptionParser, OptionGroup
 #import src.version_settings as v_settings
@@ -35,7 +36,7 @@ class Sparse_Networks:
         Would be used instead of running 'gmw'
     """
     def __init__(self, sparse_networks, nodes, net_names=None,
-                 weight_method='swsn', unweighted=False, term_weights=None):
+                 weight_method='swsn', unweighted=False, term_weights=None, verbose=False):
         self.multi_net = False
         if isinstance(sparse_networks, list):
             if len(sparse_networks) > 1:
@@ -50,6 +51,7 @@ class Sparse_Networks:
         self.node2idx = {n: i for i, n in enumerate(nodes)}
         self.net_names = net_names
         self.unweighted = unweighted
+        self.verbose = verbose
         # make sure the values are correct
         if self.multi_net is True:
             self.weight_swsn = True if weight_method.lower() == 'swsn' else False
@@ -89,33 +91,28 @@ class Sparse_Networks:
                 self.normalized_nets.append(_net_normalize(net))
 
     def weight_SWSN(self, ann_matrix):
-        self.W_SWSN, process_time, self.swsn_weights, self.swsn_indices = weight_SWSN(
-            ann_matrix, self.normalized_nets, net_names=self.net_names, nodes=self.nodes)
-        return self.W_SWSN, process_time
+        self.W, self.swsn_time, self.swsn_weights = weight_SWSN(
+            ann_matrix, normalized_nets=self.normalized_nets, 
+            net_names=self.net_names, nodes=self.nodes, verbose=self.verbose)
+        return self.W, self.swsn_time
 
-    def combine_using_weights(self, weights, indices=None):
+    def combine_using_weights(self, weights):
         """ Combine the different networks using the specified weights
-        *indices*: indices of the networks for which the weights apply. 
-            Must be the same length as the weights list
+        *weights*: list of weights, one for each network
         """
-        if indices is not None:
-            combined_network = weights[0]*self.sparse_networks[indices[0]]
-            for i in range(1,len(weights)):
-                combined_network += weights[i]*self.sparse_networks[indices[i]] 
-        else:
-            combined_network = weights[0]*self.sparse_networks[0]
-            for i in range(1,len(weights)):
-                combined_network += weights[i]*self.sparse_networks[i] 
+        combined_network = weights[0]*self.normalized_nets[0]
+        for i, w in enumerate(weights):
+            combined_network += w*self.normalized_nets[i] 
         return combined_network
 
     def weight_GMW(self, y, goid=None):
         if self.term_weights and goid in self.term_weights:
-            weights, indices = self.term_weights[goid]
-            W = self.combine_using_weights(weights, indices)
+            weights = self.term_weights[goid]
+            W = self.combine_using_weights(weights)
             process_time = 0
         else:
-            W, process_time, weights, indices = weight_GMW(y, self.normalized_nets, self.net_names, goid=goid) 
-        return W, process_time, weights, indices
+            W, process_time, weights = weight_GMW(y, self.normalized_nets, self.net_names, goid=goid) 
+        return W, process_time, weights
 
     def save_net(self, out_file):
         print("Writing %s" % (out_file))
@@ -673,28 +670,46 @@ def weight_GMW(y, normalized_nets, net_names=None, goid=None):
     if goid is not None:
         print("\tgoid %s: %d positives, %d negatives" % (goid, len(np.where(y == 1)[0]), len(np.where(y == -1)[0])))
     alphas, indices = findKernelWeights(y, normalized_nets)
+    # print out the computed weights for each network
     if net_names is not None:
         print("\tnetwork weights: %s\n" % (', '.join(
             "%s: %s" % (net_names[x], alphas[i]) for
             i, x in enumerate(indices))))
 
+    weights_list = [0]*len(normalized_nets)
+    weights_list[indices[0]] = alpha[0]
     # now add the networks together with the alpha weight applied
     combined_network = alphas[0]*normalized_nets[indices[0]]
     for i in range(1,len(alphas)):
         combined_network += alphas[i]*normalized_nets[indices[i]] 
+        weights_list[indices[i]] = alphas[i] 
     total_time = time.process_time() - start_time
 
     # don't write each goterm's combined network to a file
-    return combined_network, total_time, alphas, indices
+    return combined_network, total_time, weights_list
 
 
-def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=None):
-    """ TODO DOC
+def weight_SWSN(ann_matrix, sparse_nets=None, normalized_nets=None, net_names=None,
+                out_file=None, nodes=None, verbose=False):
+    """ 
+    *normalized_nets*: list of networks stored as scipy sparse matrices. Should already be normalized
     """
-    if len(sparse_nets) == 1:
+    # UPDATED: normalize the networks
+    if sparse_nets is not None:
+        print("Normalizing the networks")
+        normalized_nets = []
+        for net in sparse_nets:
+            normalized_nets.append(_net_normalize(net))
+    elif normalized_nets is None:
+        print("No networks given. Nothing to do")
+        return None, 0
+    if len(normalized_nets) == 1:
         print("Only one network given to weight_SWSN. Nothing to do.")
         total_time = 0
         return sparse_nets[0], total_time
+    if verbose:
+        print("Removing rows with 0 annotations/positives")
+        utils.print_memory_usage()
     # remove rows with 0 annotations/positives
     empty_rows = []
     for i in range(ann_matrix.shape[0]):
@@ -706,22 +721,30 @@ def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=No
     # don't modify the original annotation matrix to keep the rows matching the GO ids
     curr_ann_mat = delete_rows_csr(ann_matrix.tocsr(), empty_rows)
 
-    # normalize the networks
-    print("Normalizing the networks")
-    normalized_nets = []
-    for net in sparse_nets:
-        normalized_nets.append(_net_normalize(net))
+    if verbose:
+        utils.print_memory_usage()
     print("Weighting networks for %d different GO terms" % (curr_ann_mat.shape[0]))
     print("Running simultaneous weights with specific negatives")
     start_time = time.process_time()
-    alpha, indices = combineNetworksSWSN(curr_ann_mat, normalized_nets) 
+    alpha, indices = combineNetworksSWSN(curr_ann_mat, normalized_nets, verbose=verbose) 
+    # print out the computed weights for each network
     if net_names is not None:
-        print("\tnetworks chosen: %s" % (', '.join([net_names[i] for i in indices])))
+        print("network weights:")
+        #print("\tnetworks chosen: %s" % (', '.join([net_names[i] for i in indices])))
+        weights = defaultdict(int)
+        for i in range(len(alpha)):
+            weights[net_names[indices[i]]] = alpha[i]
+        weights_table = ["%0.3e"%weights[net] for net in net_names]
+        print('\t'.join(net_names))
+        print('\t'.join(weights_table))
 
     # now add the networks together with the alpha weight applied
-    combined_network = alpha[0]*sparse_nets[indices[0]]
+    weights_list = [0]*len(normalized_nets)
+    weights_list[indices[0]] = alpha[0]
+    combined_network = alpha[0]*normalized_nets[indices[0]]
     for i in range(1,len(alpha)):
-        combined_network += alpha[i]*sparse_nets[indices[i]] 
+        combined_network += alpha[i]*normalized_nets[indices[i]] 
+        weights_list[indices[i]] = alpha[i] 
     total_time = time.process_time() - start_time
 
     if out_file is not None:
@@ -743,7 +766,7 @@ def weight_SWSN(ann_matrix, sparse_nets, net_names=None, out_file=None, nodes=No
         with open(net_weight_file, 'w') as out:
             out.write(''.join("%s\t%s\n" % (net_names[idx], str(alpha[i])) for i, idx in enumerate(indices)))
 
-    return combined_network, total_time, alpha, indices
+    return combined_network, total_time, weights_list
 
 
 # copied from here: https://stackoverflow.com/a/26504995
@@ -764,10 +787,10 @@ def _net_normalize(X):
     """ 
     Normalizing networks according to node degrees.
     """
-    if X.min() < 0:
-        print("### Negative entries in the matrix are not allowed!")
-        X[X < 0] = 0 
-        print("### Matrix converted to nonnegative matrix.")
+    #if X.min() < 0:
+    #    print("### Negative entries in the matrix are not allowed!")
+    #    X[X < 0] = 0 
+    #    print("### Matrix converted to nonnegative matrix.")
     # for now assume the network is symmetric
     #if (X.T != X).all():
     #    pass

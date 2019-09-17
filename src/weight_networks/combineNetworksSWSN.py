@@ -1,7 +1,8 @@
 
 import numpy as np
 import src.algorithms.alg_utils as alg_utils
-from scipy.sparse import triu, csr_matrix, csc_matrix, vstack
+import src.utils.file_utils as utils
+import scipy.sparse as sp
 from tqdm import trange
 
 __author__ = "Jeff Law"
@@ -11,7 +12,7 @@ __author__ = "Jeff Law"
 # see http://bonneaulab.bio.nyu.edu/funcprop.html for the original matlab code
 
 
-def combineNetworksSWSN(y, W):
+def combineNetworksSWSN(y, W, verbose=False):
     """
     Python implementation of the combineNetworksSWSN (Simultaneous Weights with Specific Negatives) Matlab function.
     Used to find appropriate weights for networks with multiple GO term annotations
@@ -22,7 +23,7 @@ def combineNetworksSWSN(y, W):
     *returns*: list of weights alpha, and indices of the networks in W for those weights
     """
 
-    print(y.shape)
+    #print(y.shape)
     #print(y)
     num_goterms, num_prots = y.shape
     num_networks = len(W)
@@ -34,7 +35,7 @@ def combineNetworksSWSN(y, W):
     # Calculate the # of times i is positive
     # and the # of times (i,j) is positive
     # build the t vectors for each category
-    for i in trange(num_goterms):
+    for i in trange(num_goterms, disable=False if verbose else True):
         # TODO the matlab code has the y matrix transformed
         curr_y = y[i].toarray()[0]
         pos_idx = np.where(curr_y > 0)[0]
@@ -67,7 +68,8 @@ def combineNetworksSWSN(y, W):
 
         # TODO same with the omegas.
         # I should be able to just store the omegasTomegas
-        omegas[i] = csc_matrix((len(t_list[i]), num_networks))
+        # each index of omegas is a matrix with m=#pos+#neg rows and n=# nets columns
+        omegas[i] = sp.csc_matrix((len(t_list[i]), num_networks))
         for j in range(num_networks):
             Wpp = W[j][pos_idx,:][:,pos_idx]
             # get just the values above the diagonal
@@ -76,9 +78,9 @@ def combineNetworksSWSN(y, W):
             # stack the columns on top of each other
             neg_omega_col = Wpn.toarray().flatten('F')
             # set the column of the matrix to this network 
-            omegas[i][:,j] = csc_matrix(np.asarray([np.append(pos_omega_col, neg_omega_col)]).T)
+            omegas[i][:,j] = sp.csc_matrix(np.asarray([np.append(pos_omega_col, neg_omega_col)]).T)
             #omegas[i][:,j] = vstack([csc_matrix(pos_omega_col.T), neg_omega_col])
-        omegas[i] = omegas[i].tocsr()
+        #omegas[i] = omegas[i].tocsr()
 
     viableIndices = np.arange(num_networks)
     done = False
@@ -86,7 +88,8 @@ def combineNetworksSWSN(y, W):
     # of the distinct omegas and t vectors across categories. Iterate until
     # we have a satisfactory solution with no negative weights
     while not done:
-        print("\t%d networks" % (len(viableIndices)))
+        if verbose:
+            print("\t%d networks" % (len(viableIndices)))
         omegaTomega = np.zeros((len(viableIndices)+1, len(viableIndices)+1))
         omegaTt = np.zeros(len(viableIndices)+1)
 
@@ -129,7 +132,8 @@ def combineNetworksSWSN(y, W):
         # keep the bias term (index of 0) even if it's negative
         neg_weights = np.setdiff1d(neg_weights, np.array([0]))
         #print("\t%d empty columns, %d neg weights" % (len(empty_cols), len(neg_weights)))
-        print("\talpha: %s" % (', '.join(["%0.3e"%x for x in alphaStar])))
+        if verbose:
+            print("\talpha: %s" % (', '.join(["%0.3e"%x for x in alphaStar])))
         if len(neg_weights) > 0:
             viableIndices = np.delete(viableIndices, neg_weights-1)
 
@@ -140,9 +144,10 @@ def combineNetworksSWSN(y, W):
         # ignore/remove the bias term
         alpha = alphaStar[1:]
         indices = viableIndices
-        print("\t%d matrices chosen. Indices: %s, weights: %s\n" %
-              (len(viableIndices), ', '.join([str(x) for x in indices]),
-               ', '.join(["%0.3e"%x for x in alpha])))
+        if verbose:
+            print("\t%d matrices chosen. Indices: %s, weights: %s\n" %
+                (len(viableIndices), ', '.join([str(x) for x in indices]),
+                ', '.join(["%0.3e"%x for x in alpha])))
     else:
         indices = np.arange(num_networks)
         # use a uniform alpha for all the networks which is the
@@ -150,5 +155,6 @@ def combineNetworksSWSN(y, W):
         alpha = np.asarray([1/float(num_networks)]*num_networks)
         print("\tAll kernels eliminated or empty, " +
               "assigning an average weight for each kernel: %0.3f\n" % (alpha[0]))
-
+    if verbose:
+        utils.print_memory_usage()
     return alpha, indices
