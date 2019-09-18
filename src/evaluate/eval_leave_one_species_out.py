@@ -80,18 +80,24 @@ def eval_loso(
             # limit the scores stored to the current taxon's prots
             run_obj.target_prots = list(taxon_prots)
 
-            curr_params_results = run_and_eval_algs(
+            run_and_eval_algs(
                 run_obj, ann_obj, 
                 train_ann_mat, test_ann_mat,
                 taxons=taxons, taxon=t, **kwargs)
-            # don't store the scores for all taxons. Takes too much space
-            for key in curr_params_results:
-                params_results[key] += curr_params_results[key]
 
-    if len(params_results) != 0:
+    # I'm not resetting the params_results in run_obj,
+    # so those params_results were already appended to.
+    # just built this dict to make sure its not empty
+    alg_params_results = defaultdict(int)
+    for run_obj in alg_runners:
+        for key in run_obj.params_results:
+            alg_params_results[key] += run_obj.params_results[key]
+    if len(params_results) != 0 or len(alg_params_results) != 0:
+        # write the running times to a file
         write_stats_file(alg_runners, params_results)
+        alg_params_results.update(params_results)
         print("Final running times: " + ' '.join([
-            "%s: %0.4f" % (key, val) for key, val in sorted(params_results.items()) if 'time' in key]))
+            "%s: %0.4f" % (key, val) for key, val in sorted(alg_params_results.items()) if 'time' in key]))
     print("")
     return params_results
 
@@ -344,8 +350,11 @@ def write_stats_file(alg_runners, params_results, **kwargs):
             continue
         out_file = "%s-stats.txt" % (run_obj.out_pref)
         print("Writing stats to %s" % (out_file))
-        # first write the date, then the stats of this run. 
+        # write the stats of this run. 
         with open(out_file, 'a') as out:
+            # first write this runner's param_results
+            out.write("".join("%s\t%s\n" % (key, val) for key,val in sorted(run_obj.params_results.items())))
+            # then write the rest (e.g., SWSN running time)
             out.write("".join("%s\t%s\n" % (key, val) for key,val in sorted(params_results.items())))
 
 
