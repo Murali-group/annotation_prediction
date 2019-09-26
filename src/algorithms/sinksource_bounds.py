@@ -50,13 +50,15 @@ class SinkSourceBounds:
     def runSinkSourceBounds(self):
         self.num_nodes = self.P.shape[0]
         # f: initial vector f of amount of score received from positive nodes
+        # need to remove the non-reachable nodes here, since the bounds will not converge for them
         self.P, self.f, self.node2idx, self.idx2node = alg_utils.setup_fixed_scores(
             self.P, self.positives, self.negatives, a=self.a, 
             remove_nonreachable=True, verbose=self.verbose)
         if len(self.f) == 0:
             print("WARNING: no unknown nodes were reachable from a positive (P matrix and f vector empty after removing nonreachable nodes).")
             print("Setting all scores to 0")
-            return [], defaultdict(int)
+            scores_arr = np.zeros(self.num_nodes)
+            return scores_arr
         # if rank_nodes is specified, map those node ids to the current indices
         #if self.rank_nodes is not None:
         #    self.rank_nodes = set(self.node2idx[n] for n in self.rank_nodes if n in self.node2idx)
