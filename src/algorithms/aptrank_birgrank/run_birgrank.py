@@ -96,6 +96,26 @@ def main(sparse_net_file, obo_file, pos_neg_file=None, gaf_file=None, ignore_ec=
     return
 
 
+def setup_obo_dag_matrix(obo_file, goterms):
+    """
+    *goterms*: if a set of goterms are given, then limit the dag to 
+        the sub-ontology which has the given terms. Currently just returns the first. 
+        TODO allow for multiple
+    """
+    go_dags = go_examples.parse_obo_file_and_build_dags(obo_file)
+    dag_matrix = None
+    for h, dag in go_dags.items():
+        t = list(goterms)[0]
+        if not dag.has_node(t):
+            continue
+        dag_matrix, goids = build_hierarchy_matrix(dag, goterms, h=h)
+    if dag_matrix is None:
+        print("ERROR: term %s not found in any of the sub-ontologies" % (t))
+        sys.exit("Quitting")
+    else:
+        return dag_matrix, goids
+
+
 def build_h_ann_matrices(
         prots, go_dags, pos_neg_file=None, gaf_file=None, h='bp',
         goterms=None):
@@ -165,7 +185,7 @@ def setup_sparse_annotations(
     return ann_matrix
 
 
-def build_hierarchy_matrix(go_dag, goids, h="bp"):
+def build_hierarchy_matrix(go_dag, goids, h=None):
     """
     *goids*: the leaf terms to use to get a sub-graph of the DAG.
         All ancestor terms will be included in the DAG
@@ -183,7 +203,10 @@ def build_hierarchy_matrix(go_dag, goids, h="bp"):
     goids_list = sorted(ancestor_goids)
 
     G = nx.subgraph(go_dag, ancestor_goids)
-    print("\t%s DAG has %d nodes and %d edges" % (h, G.number_of_nodes(), G.number_of_edges()))
+    if h is not None:
+        print("\t%s DAG has %d nodes and %d edges" % (h, G.number_of_nodes(), G.number_of_edges()))
+    else:
+        print("\thierarchy DAG has %d nodes and %d edges" % (h, G.number_of_nodes(), G.number_of_edges()))
 
     # convert the GO DAG to a sparse matrix, while maintaining the order of goids so it matches with the annotation matrix
     dag_matrix = nx.to_scipy_sparse_matrix(G, nodelist=goids_list, weight=None)

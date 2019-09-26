@@ -117,6 +117,8 @@ def run(config_map, **kwargs):
     kwargs.update(config_map['eval_settings'])
 
     for dataset in input_settings['datasets']:
+        # youngs_neg: for a term t, a gene g cannot be a negative for t if g shares an annotation with any gene annotated to t 
+        kwargs['youngs_neg'] = dataset.get('youngs_neg') 
         net_obj, ann_obj, eval_ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
         # if there are no annotations, then skip this dataset
         if len(ann_obj.goids) == 0:
@@ -220,15 +222,34 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
 
     # now build the annotation matrix
     pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
-    ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_goterms, prots)
-    ann_obj = setup.Sparse_Annotations(ann_matrix, goids, prots)
+    obo_file = "%s/%s" % (input_dir, dataset['obo_file'])
+    dag_matrix, ann_matrix, goids, ann_prots = setup.create_sparse_ann_file(
+            obo_file, pos_neg_file, **kwargs)
+    #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_goterms, prots)
+    ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
+    # so that limiting the terms won't make a difference, apply youngs_neg here
+    if kwargs.get('youngs_neg'):
+        ann_obj = setup.youngs_neg(ann_obj, **kwargs)
+    if selected_goterms is not None:
+        ann_obj.limit_to_terms(selected_goterms)
+    else:
+        selected_goterms = goids
+    # align the ann_matrix prots with the prots in the network
+    ann_obj.reshape_to_prots(prots)
 
     eval_ann_obj = None
     # also check if a evaluation pos_neg_file was given
     if dataset.get('pos_neg_file_eval', '') != '':
         pos_neg_file_eval = "%s/%s" % (input_dir, dataset['pos_neg_file_eval'])
-        ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_goterms, prots)
-        eval_ann_obj = setup.Sparse_Annotations(ann_matrix, goids, prots)
+        dag_matrix, ann_matrix, goids, ann_prots = setup.create_sparse_ann_file(
+                obo_file, pos_neg_file_eval, **kwargs)
+        #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_goterms, prots)
+        eval_ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
+        if kwargs.get('youngs_neg'):
+            eval_ann_obj = setup.youngs_neg(eval_ann_obj, **kwargs)
+        # also limit the terms in the eval_ann_obj to those from the pos_neg_file
+        eval_ann_obj.limit_to_terms(selected_goterms)
+        eval_ann_obj.reshape_to_prots(prots)
     return selected_goterms, ann_obj, eval_ann_obj
 
 
@@ -253,19 +274,7 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
     if kwargs.get('verbose'):
         utils.print_memory_usage()
 
-    algs = get_algs_to_run(alg_settings)
-    # this will be handled in the birgrank and aptrank runners(?)
-    # read the extra data for birgrank/aptrank if it is specified
-    # TODO move to birgrank/aptrank runners
-    if 'birgrank' in algs or 'aptrank' in algs:
-        obo_file = alg_settings['birgrank']['obo_file'][0] if 'birgrank' in algs else alg_settings['aptrank']['obo_file'][0]
-        # TODO get the dag matrix/matrices without using the pos_neg_file
-        pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
-        dag_matrix, _, dag_goids = run_birgrank.setup_h_ann_matrices(
-                net_obj.nodes, obo_file, pos_neg_file, goterms=selected_goterms)
-        ann_obj.dag_matrix = dag_matrix
-        ann_obj.dag_goids = dag_goids
-
+    #algs = get_algs_to_run(alg_settings)
     return net_obj, ann_obj, eval_ann_obj
 
 
@@ -281,9 +290,6 @@ def setup_runners(alg_settings, net_obj, ann_obj, out_dir, **kwargs):
             for val in itertools.product(
                 *(params[param] for param in params))]
         for combo in combos:
-            if alg in ['birgrank', 'aptrank']:
-                kwargs['dag_matrix'] = ann_obj.dag_matrix
-                kwargs['dag_goids'] = ann_obj.dag_goids
             run_obj = runner.Runner(alg, net_obj, ann_obj, out_dir, combo, **kwargs)
             alg_runners.append(run_obj) 
 

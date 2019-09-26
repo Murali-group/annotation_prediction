@@ -184,6 +184,7 @@ def run_and_eval_algs(
         train_ann_mat, test_ann_mat,
         taxon=None, **kwargs):
     goids, prots = ann_obj.goids, ann_obj.prots
+    dag_matrix = ann_obj.dag_matrix
     params_results = defaultdict(int)
 
     if kwargs.get('keep_ann', False) is True: 
@@ -194,9 +195,9 @@ def run_and_eval_algs(
         print("Evaluating using only the ground-truth negatives predicted as positives as false positives")
 
     # change the annotation matrix to the current training positive examples
-    curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, goids, prots)
+    curr_ann_obj = setup.Sparse_Annotations(dag_matrix, train_ann_mat, goids, prots)
     # make an ann obj with the test ann mat
-    test_ann_obj = setup.Sparse_Annotations(test_ann_mat, goids, prots)
+    test_ann_obj = setup.Sparse_Annotations(dag_matrix, test_ann_mat, goids, prots)
     # if this is a gene based method, then run it on only the nodes which have a pos/neg annotation
     # TODO make this an option
     if run_obj.get_alg_type() == 'gene-based':
@@ -355,6 +356,8 @@ def write_stats_file(alg_runners, params_results, **kwargs):
             # first write this runner's param_results
             out.write("".join("%s\t%s\n" % (key, val) for key,val in sorted(run_obj.params_results.items())))
             # then write the rest (e.g., SWSN running time)
+            # also write the net names if multiple networks were combined
+            if run_obj.net_obj.multi_net is True:
+                out.write("net_names\t%s" % (','.join(run_obj.net_obj.net_names)))
             out.write("".join("%s\t%s\n" % (key, val) for key,val in sorted(params_results.items())))
-
 

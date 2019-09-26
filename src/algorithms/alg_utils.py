@@ -1,11 +1,11 @@
 
 import os, sys
-from scipy import sparse
+from scipy import sparse as sp
 from scipy.sparse import csr_matrix, csgraph, diags
 import numpy as np
 from collections import defaultdict
 import time
-from tqdm import tqdm
+from tqdm import tqdm, trange
 import src.utils.file_utils as utils
 import gzip
 
@@ -25,39 +25,6 @@ ALGORITHMS = [
 
 def str_(s):
     return str(s).replace('.','_')
-def get_filepath_helper(version='', alg='', exp_name='', 
-                 exp_type='loso', postfix='', **kwargs):
-    # setup the right weight_str for the filepath
-    weight_str = '%s%s%s' % (
-        '-unw' if kwargs['unweighted'] else '', 
-        '-gm2008' if kwargs['weight_gm2008'] else '',
-        '-swsn' if kwargs['weight_swsn'] else '')
-    return get_filepath(version, alg, exp_name, weight_str=weight_str,
-                 exp_type=exp_type, postfix=postfix, **kwargs) 
-
-
-def get_filepath(version='', alg='', exp_name='', weight_str='',
-                 exp_type='loso', postfix='', **kwargs):
-    """ Get the path to a output file given the algorithm and options used
-    *exp_type*: can be either 'loso', 'pred', or cv-Xfolds
-    *postfix*: added right before the .txt at the end
-    *kwargs*: all weight options and algorihtm options are needed
-    """
-    out_file = "outputs/%s/all/%s/%s/%s%s-l%d-a%s-eps%s-maxi%d%s%s%s%s.txt" % (
-        version, alg, exp_name, exp_type, weight_str,
-        0 if kwargs['sinksourceplus_lambda'] is None else kwargs['sinksourceplus_lambda'],
-        str_(kwargs['alpha']), str_(kwargs['eps']), kwargs['max_iters'],
-        '-t%s-m%s-l%s' % (
-            str_(kwargs['theta']), str_(kwargs['mu']),
-            str_(kwargs['br_lambda'])) if alg == 'birgrank' else '',
-        '-l%s-k%s-s%s-t%s-%s' % (
-            str_(kwargs['br_lambda']), str_(kwargs['apt_k']),
-            str_(kwargs['apt_s']), str_(kwargs['apt_t']),
-            kwargs['diff_type']) if alg == 'aptrank' else '',
-        '-tol%s' % (str_(kwargs['tol'])) if alg == 'genemania' else '',
-        postfix,
-    )
-    return out_file
 
 
 def select_goterms(only_functions_file=None, goterms=None):
@@ -72,50 +39,6 @@ def select_goterms(only_functions_file=None, goterms=None):
     return selected_goterms
 
 
-def parse_pos_neg_files(pos_neg_files, goterms=None):
-    # get the positives and negatives from the matrix
-    all_goid_prots = {}
-    all_goid_neg = {}
-    for pos_neg_file in pos_neg_files:
-        #goid_prots, goid_neg = self.parse_pos_neg_matrix(self.pos_neg_file)
-        goid_prots, goid_neg = parse_pos_neg_file(pos_neg_file, goterms=goterms)
-        all_goid_prots.update(goid_prots)
-        all_goid_neg.update(goid_neg)
-
-    return all_goid_prots, all_goid_neg
-
-
-def parse_pos_neg_file(pos_neg_file, goterms=None):
-    print("Reading positive and negative annotations for each protein from %s" % (pos_neg_file))
-    goid_prots = {}
-    goid_neg = {}
-    all_prots = set()
-    # TODO possibly use pickle
-    if not os.path.isfile(pos_neg_file):
-        print("Warning: %s file not found" % (pos_neg_file))
-        return goid_prots, goid_neg
-
-        #for goid, pos_neg_assignment, prots in utils.readColumns(pos_neg_file, 1,2,3):
-    with open(pos_neg_file, 'r') as f:
-        for line in f:
-            if line[0] == '#':
-                continue
-            goid, pos_neg_assignment, prots = line.rstrip().split('\t')[:3]
-            if goterms and goid not in goterms:
-                continue
-            prots = set(prots.split(','))
-            if int(pos_neg_assignment) == 1:
-                goid_prots[goid] = prots
-            elif int(pos_neg_assignment) == -1:
-                goid_neg[goid] = prots
-
-            all_prots.update(prots)
-
-    print("\t%d GO terms, %d prots" % (len(goid_prots), len(all_prots)))
-
-    return goid_prots, goid_neg
-
-
 def setup_sparse_network(network_file, node2idx_file=None, forced=False):
     """
     Takes a network file and converts it to a sparse matrix
@@ -125,7 +48,7 @@ def setup_sparse_network(network_file, node2idx_file=None, forced=False):
         node2idx_file = sparse_net_file + "-node-ids.txt"
     if forced is False and (os.path.isfile(sparse_net_file) and os.path.isfile(node2idx_file)):
         print("Reading network from %s" % (sparse_net_file))
-        W = sparse.load_npz(sparse_net_file)
+        W = sp.load_npz(sparse_net_file)
         print("\t%d nodes and %d edges" % (W.shape[0], len(W.data)/2))
         print("Reading node names from %s" % (node2idx_file))
         node2idx = {n: int(n2) for n, n2 in utils.readColumns(node2idx_file, 1, 2)}
@@ -152,7 +75,7 @@ def setup_sparse_network(network_file, node2idx_file=None, forced=False):
         j = [node2idx[n] for n in v]
         print("\tcreating sparse matrix")
         #print(i,j,w)
-        W = sparse.coo_matrix((w, (i, j)), shape=(len(prots), len(prots))).tocsr()
+        W = sp.coo_matrix((w, (i, j)), shape=(len(prots), len(prots))).tocsr()
         # make sure it is symmetric
         if (W.T != W).nnz == 0:
             pass
@@ -162,7 +85,7 @@ def setup_sparse_network(network_file, node2idx_file=None, forced=False):
             print("### Matrix converted to symmetric.")
         #name = os.path.basename(net_file)
         print("\twriting sparse matrix to %s" % (sparse_net_file))
-        sparse.save_npz(sparse_net_file, W)
+        sp.save_npz(sparse_net_file, W)
         print("\twriting node2idx labels to %s" % (node2idx_file))
         with open(node2idx_file, 'w') as out:
             out.write(''.join(["%s\t%d\n" % (prot,i) for i, prot in enumerate(prots)]))
@@ -171,6 +94,25 @@ def setup_sparse_network(network_file, node2idx_file=None, forced=False):
         sys.exit(1)
 
     return W, prots
+
+
+def align_mat(mat, new_shape, row_labels, row_label_to_new_index, 
+        map_to=False, verbose=False):
+    """
+    This function is to algin a matrix with rows ordered differently, and a differeint shape
+    *map_to*: Use the row_label_to_new_index mapping in the new matrix, and *row_labels* in the "old" matrix. 
+        Otherwise, use *row_labels* in the new matrix, and row_label_to_new_index in the "old" matrix
+    """
+    new_mat = sp.lil_matrix(new_shape)
+    # need to realign the pos_mat and the leaf_ann_mat, since the terms could be ordered differently
+    for i in trange(len(row_labels), disable=False if verbose else True):
+        old_index = i
+        new_index = row_label_to_new_index[row_labels[i]]
+        if map_to:
+            old_index = new_index
+            new_index = i
+        new_mat[new_index] = mat[old_index]
+    return new_mat.tocsr()
 
 
 def normalizeGraphEdgeWeights(W, ss_lambda=None, axis=1):
@@ -207,7 +149,7 @@ def _net_normalize(W, axis=0):
     deg = np.asarray(W.sum(axis=axis)).flatten()
     deg = np.divide(1., np.sqrt(deg))
     deg[np.isinf(deg)] = 0
-    D = sparse.diags(deg)
+    D = sp.diags(deg)
     # normalize W by multiplying D^(-1/2) * W * D^(-1/2)
     P = D.dot(W.dot(D))
     return P
@@ -308,11 +250,13 @@ def setup_fixed_scores(P, positives, negatives=None, a=1,
         # just set them to 0
         newP = remove_node_edges(P, fixed_nodes)
         f[fixed_nodes] = 0
-    assert P.shape[0] == P.shape[1], "Matrix is not square"
-    assert P.shape[1] == len(f), "f doesn't match size of P"
+    assert newP.shape[0] == newP.shape[1], "Matrix is not square"
+    assert newP.shape[1] == len(f), "f doesn't match size of P"
 
-    #return P, f, node2idx, idx2node
-    return newP, f
+    if remove_nonreachable is True:
+        return newP, f, node2idx, idx2node
+    else:
+        return newP, f
 
 
 def remove_node_edges(W, nodes_idx):
@@ -364,3 +308,49 @@ def select_nodes(mat, indices):
     mask = np.zeros(mat.shape[0], dtype=bool)
     mask[indices] = True
     return mat[mask, :][:, mask]
+
+
+# no longer needed
+def parse_pos_neg_files(pos_neg_files, goterms=None):
+    # get the positives and negatives from the matrix
+    all_goid_prots = {}
+    all_goid_neg = {}
+    for pos_neg_file in pos_neg_files:
+        #goid_prots, goid_neg = self.parse_pos_neg_matrix(self.pos_neg_file)
+        goid_prots, goid_neg = parse_pos_neg_file(pos_neg_file, goterms=goterms)
+        all_goid_prots.update(goid_prots)
+        all_goid_neg.update(goid_neg)
+
+    return all_goid_prots, all_goid_neg
+
+
+def parse_pos_neg_file(pos_neg_file, goterms=None):
+    print("Reading positive and negative annotations for each protein from %s" % (pos_neg_file))
+    goid_prots = {}
+    goid_neg = {}
+    all_prots = set()
+    # TODO possibly use pickle
+    if not os.path.isfile(pos_neg_file):
+        print("Warning: %s file not found" % (pos_neg_file))
+        return goid_prots, goid_neg
+
+        #for goid, pos_neg_assignment, prots in utils.readColumns(pos_neg_file, 1,2,3):
+    with open(pos_neg_file, 'r') as f:
+        for line in f:
+            if line[0] == '#':
+                continue
+            goid, pos_neg_assignment, prots = line.rstrip().split('\t')[:3]
+            if goterms and goid not in goterms:
+                continue
+            prots = set(prots.split(','))
+            if int(pos_neg_assignment) == 1:
+                goid_prots[goid] = prots
+            elif int(pos_neg_assignment) == -1:
+                goid_neg[goid] = prots
+
+            all_prots.update(prots)
+
+    print("\t%d GO terms, %d prots" % (len(goid_prots), len(all_prots)))
+
+    return goid_prots, goid_neg
+

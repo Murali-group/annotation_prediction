@@ -4,6 +4,7 @@ import time
 import src.algorithms.aptrank_birgrank.birgrank as birgrank
 #import src.algorithms.aptrank_birgrank.aptrank as aptrank
 import src.algorithms.alg_utils as alg_utils
+import src.setup_sparse_networks as setup
 from scipy import sparse as sp
 import numpy as np
 #from tqdm import tqdm, trange
@@ -12,19 +13,16 @@ import numpy as np
 def setupInputs(run_obj):
     # extract the variables out of the annotation object
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
+    run_obj.hierarchy_mat = run_obj.ann_obj.dag_matrix
     run_obj.goids = run_obj.ann_obj.goids
 
     # setup the matrices
     if run_obj.kwargs.get('verbose'):
         print("Setting up the Birg/AptRank annotation matrix")
-    run_obj.hierarchy_mat = run_obj.kwargs['dag_matrix']
-    run_obj.dag_goids  = run_obj.kwargs['dag_goids'] 
-    run_obj.dag_goids2idx = {g: i for i, g in enumerate(run_obj.dag_goids)}
-    # get only the positive examples from the ann_matrix, and line them up with the dag matrix
-    run_obj.pos_mat = sp.csr_matrix((len(run_obj.dag_goids), run_obj.ann_matrix.shape[1]))
-    for i in range(len(run_obj.goids)):
-        dag_goid_idx = run_obj.dag_goids2idx[run_obj.goids[i]]
-        run_obj.pos_mat[dag_goid_idx] = (run_obj.ann_matrix[i] > 0).astype(int)
+    # get only the positive examples from the ann_matrix
+    run_obj.pos_mat = (run_obj.ann_matrix > 0).astype(int)
+    # make sure the annotations are propagated up the DAG
+    run_obj.pos_mat = setup.propagate_ann_up_dag(run_obj.pos_mat, run_obj.hierarchy_mat)
     # make sure there's no 0s leftover
     run_obj.pos_mat.eliminate_zeros()
     assert (run_obj.pos_mat.shape[0] == run_obj.hierarchy_mat.shape[0]), \
@@ -124,11 +122,12 @@ def run(run_obj):
     #params_results["%s_wall_time"%alg] += wall_time
     params_results["%s_process_time"%alg] += process_time
 
-    # limit the scores matrix to only the GOIDs for which we have annotations
-    for i in range(len(run_obj.goids)):
-        goid_scores[i] = Xh[run_obj.dag_goids2idx[run_obj.goids[i]]]
+    # limit the scores matrix to only the GOIDs for which we want the scores
+    for i in range(len(run_obj.goids_to_run)):
+        idx = run_obj.ann_obj.goid2idx[goid]
+        goid_scores[idx] = Xh[idx]
 
-    run_obj.goid_scores = goid_scores
+    run_obj.goid_scores = Xh
     run_obj.params_results = params_results
     return
 
