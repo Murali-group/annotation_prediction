@@ -641,6 +641,7 @@ def youngs_neg(ann_obj, **kwargs):
     for a term t, a gene g cannot be a negative for t if g shares an annotation with any gene annotated to t  
     *ann_obj*: contains the terms x genes matrix with 1 (positive), -1 (negative) and 0 (unknown) assignments, as well as the list of goids, and prots
     *cat*: the GO category to get (either P, F, or C)
+    *returns*: The ann_obj modified inplace
     """
     print("Running the Youngs 2013 method for better negative examples")
     goids, prots = ann_obj.goids, ann_obj.prots  
@@ -661,21 +662,22 @@ def youngs_neg(ann_obj, **kwargs):
     # UPDATE: Instead of a gene x gene matrix, I can use a term x term matrix, which would be much smaller
     co_ann_mat = (leaf_ann_mat.dot(leaf_ann_mat.T)).dot(pos_mat)
     # the negatives which are coannoated with another gene will become 0 or greater
-    new_neg_mat = neg_mat + co_ann_mat
+    neg_mat = neg_mat + co_ann_mat
     # get the matrix of only negative examples
-    new_neg_mat = (new_neg_mat < 0).astype(int)
-    new_num_neg = len(new_neg_mat.data)
+    neg_mat = (neg_mat < 0).astype(int)
+    new_num_neg = len(neg_mat.data)
     # and add them back together
-    new_ann_mat = pos_mat - new_neg_mat
-    new_ann_mat.eliminate_zeros() 
+    ann_obj.ann_matrix = pos_mat - neg_mat
+    ann_obj.ann_matrix.eliminate_zeros() 
     if kwargs.get('verbose'):
         utils.print_memory_usage()
-    new_ann_obj = Sparse_Annotations(
-            ann_obj.dag_matrix, new_ann_mat, goids, prots)
+    # store them in the original ann_matrix instead of making a copy
+    #new_ann_obj = Sparse_Annotations(
+    #        ann_obj.dag_matrix, new_ann_mat, goids, prots)
     print("\t%d (%0.2f%%) negative examples relabeled to unknown examples (%d negative examples before, %d after)." % (
         num_neg - new_num_neg, (num_neg - new_num_neg) / float(num_neg)*100, num_neg, new_num_neg))
     print("\t%d total positive examples" % (num_pos))
-    return new_ann_obj
+    return ann_obj
 
 
 def get_most_specific_ann(pos_mat, dag_matrix, verbose=False):
