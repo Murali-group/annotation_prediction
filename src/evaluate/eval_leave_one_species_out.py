@@ -2,7 +2,6 @@
 # script to see how well we can retrieve annotations of another species
 # using the annotations of the other 18
 
-from optparse import OptionParser,OptionGroup
 from collections import defaultdict
 import os
 import sys
@@ -11,6 +10,7 @@ import os
 import src.setup_sparse_networks as setup
 import src.algorithms.alg_utils as alg_utils
 import src.utils.file_utils as utils
+import src.utils.ontology_utils as go_utils
 import src.evaluate.eval_utils as eval_utils
 from tqdm import tqdm, trange
 import numpy as np
@@ -63,6 +63,10 @@ def eval_loso(
         if len(sp_goterms) == 0:
             print("\tskipping")
             continue
+        if kwargs.get('sp_leaf_terms_only'):
+            leaf_terms = go_utils.get_most_specific_terms(sp_goterms, ann_obj=ann_obj)
+            print("\t'sp_leaf_terms_only': %d / %d terms are most specific, or leaf terms" % (len(leaf_terms), len(sp_goterms)))
+            sp_goterms = leaf_terms 
 
         taxon_prots = species_to_uniprot_idx[t]
         for run_obj in alg_runners:

@@ -22,6 +22,7 @@ import src.evaluate.cross_validation as cross_validation
 import src.evaluate.eval_leave_one_species_out as eval_loso
 import src.utils.file_utils as utils
 import src.utils.string_utils as string_utils
+import src.utils.ontology_utils as go_utils
 
 
 #class Alg_Runner:
@@ -117,8 +118,14 @@ def run(config_map, **kwargs):
     kwargs.update(config_map['eval_settings'])
 
     for dataset in input_settings['datasets']:
+        # add options specified for this dataset to kwargs  
         # youngs_neg: for a term t, a gene g cannot be a negative for t if g shares an annotation with any gene annotated to t 
         kwargs['youngs_neg'] = dataset.get('youngs_neg') 
+        # leaf_terms_only: limit the terms to only those that are the most specific, meaning remove the ancestors of all terms 
+        kwargs['leaf_terms_only'] = dataset.get('leaf_terms_only') 
+        # sp_leaf_terms_only: limit the terms to only those that are the most specific, meaning remove the ancestors of all terms 
+        kwargs['sp_leaf_terms_only'] = dataset.get('sp_leaf_terms_only') 
+
         net_obj, ann_obj, eval_ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
         # if there are no annotations, then skip this dataset
         if len(ann_obj.goids) == 0:
@@ -217,7 +224,7 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     # if specific goterms are passed in_then ignore the only functions file
     if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
         only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
-    selected_goterms = alg_utils.select_goterms(
+    selected_terms = alg_utils.select_goterms(
             only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
 
     # now build the annotation matrix
@@ -225,15 +232,25 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     obo_file = "%s/%s" % (input_dir, dataset['obo_file'])
     dag_matrix, ann_matrix, goids, ann_prots = setup.create_sparse_ann_file(
             obo_file, pos_neg_file, **kwargs)
-    #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_goterms, prots)
+    #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_terms, prots)
     ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
     # so that limiting the terms won't make a difference, apply youngs_neg here
     if kwargs.get('youngs_neg'):
         ann_obj = setup.youngs_neg(ann_obj, **kwargs)
-    if selected_goterms is not None:
-        ann_obj.limit_to_terms(selected_goterms)
+    if kwargs.get('leaf_terms_only'):
+        terms = selected_terms if selected_terms is not None else goids
+        # limit the terms to only those that are the most specific (i.e., leaf terms),
+        # meaning remove the ancestors of all terms 
+        leaf_terms = go_utils.get_most_specific_terms(terms, ann_obj=ann_obj)
+        print("\t%d / %d terms are most specific, or leaf terms" % (len(leaf_terms), len(terms)))
+        if selected_terms is not None:
+            selected_terms &= leaf_terms 
+        else:
+            selected_terms = leaf_terms 
+    if selected_terms is not None:
+        ann_obj.limit_to_terms(selected_terms)
     else:
-        selected_goterms = goids
+        selected_terms = goids
     # align the ann_matrix prots with the prots in the network
     ann_obj.reshape_to_prots(prots)
 
@@ -243,14 +260,14 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
         pos_neg_file_eval = "%s/%s" % (input_dir, dataset['pos_neg_file_eval'])
         dag_matrix, ann_matrix, goids, ann_prots = setup.create_sparse_ann_file(
                 obo_file, pos_neg_file_eval, **kwargs)
-        #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_goterms, prots)
+        #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_terms, prots)
         eval_ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
         if kwargs.get('youngs_neg'):
             eval_ann_obj = setup.youngs_neg(eval_ann_obj, **kwargs)
         # also limit the terms in the eval_ann_obj to those from the pos_neg_file
-        eval_ann_obj.limit_to_terms(selected_goterms)
+        eval_ann_obj.limit_to_terms(selected_terms)
         eval_ann_obj.reshape_to_prots(prots)
-    return selected_goterms, ann_obj, eval_ann_obj
+    return selected_terms, ann_obj, eval_ann_obj
 
 
 def get_algs_to_run(alg_settings):
@@ -270,7 +287,7 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
     if kwargs.get('verbose'):
         utils.print_memory_usage()
     #ann_obj = setup_annotations(input_dir, dataset, **kwargs)
-    selected_goterms, ann_obj, eval_ann_obj = load_annotations(net_obj.nodes, dataset, input_dir, **kwargs)
+    selected_terms, ann_obj, eval_ann_obj = load_annotations(net_obj.nodes, dataset, input_dir, **kwargs)
     if kwargs.get('verbose'):
         utils.print_memory_usage()
 
