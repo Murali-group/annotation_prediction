@@ -123,11 +123,14 @@ def run(run_obj):
     params_results["%s_process_time"%alg] += process_time
 
     # limit the scores matrix to only the GOIDs for which we want the scores
-    for i in range(len(run_obj.goids_to_run)):
-        idx = run_obj.ann_obj.goid2idx[goid]
-        goid_scores[idx] = Xh[idx]
+    if len(run_obj.goids_to_run) < goid_scores.shape[0]:
+        for goid in run_obj.goids_to_run:
+            idx = run_obj.ann_obj.goid2idx[goid]
+            goid_scores[idx] = Xh[idx]
+    else:
+        goid_scores = Xh
 
-    run_obj.goid_scores = Xh
+    run_obj.goid_scores = goid_scores
     run_obj.params_results = params_results
     return
 
