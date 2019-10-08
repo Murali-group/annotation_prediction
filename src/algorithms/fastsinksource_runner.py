@@ -71,7 +71,7 @@ def run(run_obj):
     # because if it isn't empty, overwriting the stored scores seems to be time consuming
     goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     print("Running %s with these parameters: %s" % (alg, params))
-    if len(run_obj.target_prots) != P.shape[0]:
+    if len(run_obj.target_prots) != len(run_obj.net_obj.nodes):
         print("\tstoring scores for only %d target prots" % (len(run_obj.target_prots)))
 
     # run FastSinkSource on each GO term individually
@@ -90,7 +90,7 @@ def run(run_obj):
         if run_obj.net_obj.weight_gmw is True:
             start_time = time.process_time()
             # weight the network for each GO term individually
-            W,_, _,_ = run_obj.net_obj.weight_GMW(y.toarray()[0], goid)
+            W,_,_ = run_obj.net_obj.weight_GMW(y.toarray()[0], goid)
             P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=params.get('lambda', None))
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 

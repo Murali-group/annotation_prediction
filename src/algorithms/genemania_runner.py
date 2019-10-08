@@ -63,7 +63,7 @@ def run(run_obj):
     goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     L, alg = run_obj.L, run_obj.name
     print("Running %s with these parameters: %s" % (alg, run_obj.params))
-    if len(run_obj.target_prots) != L.shape[0]:
+    if len(run_obj.target_prots) != len(run_obj.net_obj.nodes):
         print("\tstoring scores for only %d target prots" % (len(run_obj.target_prots)))
 
     # run GeneMANIA on each GO term individually
@@ -75,7 +75,7 @@ def run(run_obj):
         if run_obj.net_obj.weight_gmw is True:
             start_time = time.process_time()
             # weight the network for each GO term individually
-            W,_,_,_ = run_obj.net_obj.weight_GMW(y, goid)
+            W,_,_ = run_obj.net_obj.weight_GMW(y, goid)
             L = genemania.setup_laplacian(W)
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 

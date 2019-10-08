@@ -34,6 +34,7 @@ def setupInputs(run_obj):
         # Cannot be used by birgrank. Change to weight_swsn for now
         print("WARNING: Apt/BirgRank cannot use the gmw weighting method since scores are computed for all terms simultaneously. Using SWSN instead.")
         run_obj.net_obj.weight_swsn = True 
+        run_obj.net_obj.weight_str = "swsn"
         run_obj.net_obj.weight_gmw = False 
     if run_obj.net_obj.weight_swsn:
         W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
@@ -59,6 +60,8 @@ def get_alg_type():
 
 # setup the params_str used in the output file
 def setup_params_str(weight_str, params, name):
+    if weight_str == "gmw":
+        weight_str = "swsn"
     params_str = "%s" % (weight_str)
     if name == 'birgrank':
         alpha, theta, mu, br_lambda = params['alpha'], params['theta'], params['mu'], params['lambda'] 
