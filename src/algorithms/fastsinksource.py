@@ -64,7 +64,7 @@ def runFastSinkSource(P, positives, negatives=None, max_iters=1000, eps=0.0001, 
     num_nodes = P.shape[0]
     if len(positives) == 0:
         print("WARNING: No positive examples given. Skipping.")
-        return np.zeros(len(num_nodes)), 0,0,0
+        return np.zeros(num_nodes), 0,0,0
     # remove the positive and negative nodes from the graph 
     # and setup the f vector which contains the influence from positive and negative nodes
     newP, f, = alg_utils.setup_fixed_scores(
