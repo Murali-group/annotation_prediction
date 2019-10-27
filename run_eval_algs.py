@@ -222,23 +222,29 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     # or the --goterm command-line option
     only_functions_file = None
     # if specific goterms are passed in_then ignore the only functions file
-    if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
+    #if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
+    # for SWSN to be correct, cannot limit to a single term with kwargs['goterm']
+    # TODO add a 'test' option or something to be able to limit to a single term
+    if 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
         only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
     selected_terms = alg_utils.select_goterms(
             only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
 
+    # write/load the processed annotation matrix in a pos_neg_file version of the network folder
+    # TODO this is hacky, but works for now
+    pos_neg_str = dataset['pos_neg_file'] \
+                       .replace('/','-').replace('pos-neg-','') \
+                       .replace('.txt','').replace('.tsv','').replace('.gz','')
+    pos_neg_str += '-Yneg' if kwargs.get('youngs_neg') else ''
+    sparse_ann_file = "%s/%s/sparse-anns/%s.npz" % (input_dir, dataset['net_version'], pos_neg_str)
     # now build the annotation matrix
     pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
     obo_file = "%s/%s" % (input_dir, dataset['obo_file'])
-    dag_matrix, ann_matrix, goids, ann_prots = setup.create_sparse_ann_file(
-            obo_file, pos_neg_file, **kwargs)
-    #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_terms, prots)
-    ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
-    # so that limiting the terms won't make a difference, apply youngs_neg here
-    if kwargs.get('youngs_neg'):
-        ann_obj = setup.youngs_neg(ann_obj, **kwargs)
+    ann_obj = setup.create_sparse_ann_and_align_to_net(
+            obo_file, pos_neg_file, sparse_ann_file, prots, **kwargs)
+
     if kwargs.get('leaf_terms_only'):
-        terms = selected_terms if selected_terms is not None else goids
+        terms = selected_terms if selected_terms is not None else ann_obj.goids
         # limit the terms to only those that are the most specific (i.e., leaf terms),
         # meaning remove the ancestors of all terms 
         leaf_terms = go_utils.get_most_specific_terms(terms, ann_obj=ann_obj)
@@ -250,23 +256,21 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     if selected_terms is not None:
         ann_obj.limit_to_terms(selected_terms)
     else:
-        selected_terms = goids
-    # align the ann_matrix prots with the prots in the network
-    ann_obj.reshape_to_prots(prots)
+        selected_terms = ann_obj.goids
 
     eval_ann_obj = None
-    # also check if a evaluation pos_neg_file was given
+    # also check if an evaluation pos_neg_file was given
     if dataset.get('pos_neg_file_eval', '') != '':
+        pos_neg_str = dataset['pos_neg_file_eval'] \
+                        .replace('/','-').replace('pos-neg-','') \
+                        .replace('.txt','').replace('.tsv','').replace('.gz','')
+        pos_neg_str += '-Yneg' if kwargs.get('youngs_neg') else ''
+        sparse_ann_file = "%s/%s/sparse-anns/%s.npz" % (input_dir, dataset['net_version'], pos_neg_str)
         pos_neg_file_eval = "%s/%s" % (input_dir, dataset['pos_neg_file_eval'])
-        dag_matrix, ann_matrix, goids, ann_prots = setup.create_sparse_ann_file(
-                obo_file, pos_neg_file_eval, **kwargs)
-        #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file_eval, selected_terms, prots)
-        eval_ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
-        if kwargs.get('youngs_neg'):
-            eval_ann_obj = setup.youngs_neg(eval_ann_obj, **kwargs)
+        eval_ann_obj = setup.create_sparse_ann_and_align_to_net(
+                obo_file, pos_neg_file_eval, sparse_ann_file, prots, **kwargs)
         # also limit the terms in the eval_ann_obj to those from the pos_neg_file
         eval_ann_obj.limit_to_terms(selected_terms)
-        eval_ann_obj.reshape_to_prots(prots)
     return selected_terms, ann_obj, eval_ann_obj
 
 

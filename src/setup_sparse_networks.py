@@ -183,7 +183,7 @@ class Sparse_Annotations:
         """ *terms_list*: list of terms. Data from rows not in this list of terms will be empty
         """
         terms_idx = [self.goid2idx[t] for t in terms_list if t in self.goid2idx]
-        print("\tlimitting data in annotation matrix from %d terms to %d" % (len(self.goids), len(terms_idx)))
+        print("\tlimiting data in annotation matrix from %d terms to %d" % (len(self.goids), len(terms_idx)))
         num_pos = len((self.ann_matrix > 0).astype(int).data)
         terms = np.zeros(len(self.goids))
         terms[terms_idx] = 1
@@ -391,6 +391,43 @@ def convert_nodes_to_int(G):
     # see also convert_node_labels_to_integers
     G = nx.relabel_nodes(G,node2int, copy=False)
     return G, node2int, int2node
+
+
+def create_sparse_ann_and_align_to_net(
+        obo_file, pos_neg_file, sparse_ann_file, net_prots,
+        forced=False, verbose=False, **kwargs):
+    """
+    Wrapper around create_sparse_ann_file that also runs Youngs Negatives (potentially RAM heavy)
+    and aligns the ann_matrix to a given network, both of which can be time consuming
+    and stores those results to a file
+    """ 
+    if not kwargs.get('forcenet') and os.path.isfile(sparse_ann_file):
+        print("Reading annotation matrix from %s" % (sparse_ann_file))
+        loaded_data = np.load(sparse_ann_file, allow_pickle=True)
+        dag_matrix = make_csr_from_components(loaded_data['arr_0'])
+        ann_matrix = make_csr_from_components(loaded_data['arr_1'])
+        goids, prots = loaded_data['arr_2'], loaded_data['arr_3']
+        ann_obj = Sparse_Annotations(dag_matrix, ann_matrix, goids, prots)
+    else:
+        dag_matrix, ann_matrix, goids, ann_prots = create_sparse_ann_file(
+                obo_file, pos_neg_file, **kwargs)
+        #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_terms, prots)
+        ann_obj = Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
+        # so that limiting the terms won't make a difference, apply youngs_neg here
+        if kwargs.get('youngs_neg'):
+            ann_obj = youngs_neg(ann_obj, **kwargs)
+        # align the ann_matrix prots with the prots in the network
+        ann_obj.reshape_to_prots(net_prots)
+
+        print("Writing sparse annotations to %s" % (sparse_ann_file))
+        os.makedirs(os.path.dirname(sparse_ann_file), exist_ok=True)
+        # store all the data in the same file
+        dag_matrix_data = get_csr_components(ann_obj.dag_matrix)
+        ann_matrix_data = get_csr_components(ann_obj.ann_matrix)
+        np.savez_compressed(
+            sparse_ann_file, dag_matrix_data, 
+            ann_matrix_data, ann_obj.goids, ann_obj.prots)
+    return ann_obj
 
 
 def create_sparse_ann_file(
