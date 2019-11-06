@@ -3,6 +3,10 @@ import numpy as np
 import src.algorithms.alg_utils as alg_utils
 import src.utils.file_utils as utils
 import scipy.sparse as sp
+# for some reason, this warning prints out way too much. 
+# Ignore it for now
+import warnings
+warnings.simplefilter('ignore', sp.SparseEfficiencyWarning)
 from tqdm import trange
 
 __author__ = "Jeff Law"
