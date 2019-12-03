@@ -68,17 +68,21 @@ def main(args):
     #selected_strains_file = "inputs/selected-strains.txt"
     selected_strains = None 
     if opts.selected_strains is not None:
+        print("reading %s" % (opts.selected_strains))
         selected_strains = utils.readItemSet(opts.selected_strains, 1)
+        print("\t%d total taxon ids" % (len(selected_strains)))
 
     last_taxon = ""
     # initialize output file handle variables
     out = None
     out_gain = None
+    print("reading %s and writing each taxon dir in %s" % (opts.goa_annotations, opts.out_dir))
     # now split the file by species
     with gzip.open(opts.goa_annotations, 'rb') as f:
         # it takes a while to count the number of lines, so I stored the line count from a previous run here
         if 'all' in opts.goa_annotations:
-            total_lines = 408333951
+            #total_lines = 408333951
+            total_lines = 697908163  # 2019-10
         elif 'gcrp' in opts.goa_annotations:
             total_lines = 137704163
         for orig_line in tqdm(f, total=total_lines):
