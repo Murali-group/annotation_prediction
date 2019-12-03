@@ -108,8 +108,6 @@ def eval_loso(
 
 def get_uniprot_species(taxon_file, ann_obj):
     print("Getting species of each prot from %s" % (taxon_file))
-    # for each of the 19 species, leave out their annotations 
-    # and see how well we can retrieve them 
     uniprot_to_species = utils.readDict(taxon_file, 1,2)
     # also build the reverse, but with the node idx instead of the UniProt ID
     node2idx = {n: i for i, n in enumerate(ann_obj.prots)}
@@ -203,9 +201,11 @@ def run_and_eval_algs(
     # make an ann obj with the test ann mat
     test_ann_obj = setup.Sparse_Annotations(dag_matrix, test_ann_mat, goids, prots)
     # if this is a gene based method, then run it on only the nodes which have a pos/neg annotation
-    # TODO make this an option
-    if run_obj.get_alg_type() == 'gene-based':
-        run_obj.kwargs['nodes_to_run'] = test_ann_mat.sum(axis=0).nonzero()[1]
+    # unless specified otherwise by the "run_all_nodes" flag
+    if run_obj.get_alg_type() == 'gene-based' and not run_obj.kwargs.get("run_all_nodes"):
+        # sum the boolean of the columns, then use nonzero to get the columns with a nonzero value
+        run_obj.kwargs['nodes_to_run'] = (test_ann_mat != 0).sum(axis=0).nonzero()[1]
+        print("\trunning %s using only the %d pos/neg nodes" % (run_obj.name, len(run_obj.kwargs['nodes_to_run'])))
 
     # setup the output file. Could be used by the runners to write temp files or other output files
     exp_type="loso" 
@@ -255,7 +255,7 @@ def run_and_eval_algs(
 def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
                     eval_ann_obj=None, keep_ann=False, 
                     non_pos_as_neg_eval=False, eval_goterms_with_left_out_only=False,
-                    oracle=False, num_test_cutoff=1, **kwargs):
+                    oracle=False, num_test_cutoff=10, **kwargs):
     """
     Training positives are removed from testing positives, and train pos and neg are removed from test neg
         I don't remove training negatives from testing positives, because not all algorithms use negatives
@@ -310,13 +310,11 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
                 # everything minus the positives
                 test_neg = set(prots) - test_pos
         else:
-            # TODO I should limit these to the proteins in the network
             test_pos = eval_pos & species_to_uniprot_idx[t]
             # UPDATE 2018-06-27: Only evaluate the species prots as negatives, not all prots
             if non_pos_as_neg_eval:
                 test_neg = species_to_uniprot_idx[t] - eval_pos
                 test_neg.discard(None)
-                #test_neg = np.asarray(sorted(test_neg)).astype(int)
             else:
                 test_neg = eval_neg & species_to_uniprot_idx[t]
         # UPDATE 2018-06-30: Remove test positives/negatives that are part of the training positives/negatives
@@ -347,6 +345,56 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
     return train_ann_mat.tocsr(), test_ann_mat.tocsr(), sp_goterms
 
 
+def split_ann_mat_train_test(
+        test_prots, ann_obj, eval_ann_obj=None, num_test_cutoff=10, **kwargs):
+    """
+    Split the annotation matrix into a training and testing matrix using the *test_prots*
+    *test_prots*: array with 1s at positions of nodes to evaluate, for which the training annotations must be removed
+    *eval_ann_obj*: annotation matrix from which to get the test ann matrix
+    *num_test_cutoff*: minimum number of annotations for training and for testing for each term 
+    """
+    ann_matrix, goids = ann_obj.ann_matrix, ann_obj.goids
+
+    # get the annotations of only the test prots
+    # by multiplying a diagonal matrix with 1s at the test prot indexes
+    diag = sparse.diags(test_prots)
+    test_mat = ann_matrix.dot(diag)
+    # and subtract them from the original ann matrix to leave them out of the training matrix
+    train_mat = ann_matrix - test_mat
+
+    # if a different set of annotations will be used for evaluating, then extract those as the test_mat
+    if eval_ann_obj is not None:
+        # need to re-align the test mat so the goids match the train mat
+        test_mat = eval_ann_obj.ann_matrix.dot(diag)
+        if len(ann_obj.goids) != len(eval_ann_obj.goids):
+            new_test_mat = sparse.lil_matrix(test_mat.shape)
+            for i, goid in enumerate(ann_obj.goids):
+                i2 = eval_ann_obj.goid2idx.get(goid)
+                if i2 is None:
+                    continue
+                new_test_mat[i] = test_mat[i2]
+            test_mat = new_test_mat.tocsr()
+
+    # find the terms that pass the num_test_cutoff
+    num_train_pos_per_term = (train_mat > 0).sum(axis=1)
+    num_train_neg_per_term = (train_mat < 0).sum(axis=1)
+    num_test_pos_per_term = (test_mat > 0).sum(axis=1)
+    num_test_neg_per_term = (test_mat < 0).sum(axis=1)
+    goterms_passing_cutoff = []
+    for i in range(ann_matrix.shape[0]):
+        # UPDATE 2018-10: Add a cutoff on both the # of training positive and # of test pos
+        if num_train_pos_per_term[i] < num_test_cutoff or \
+           num_test_pos_per_term[i] < num_test_cutoff or \
+           (num_train_neg_per_term[i] == 0 or num_test_neg_per_term[i] == 0):
+            continue
+        goterms_passing_cutoff.append(goids[i])
+
+    #if eval_ann_matrix is not None and not keep_ann and eval_goterms_with_left_out_only:
+    #    print("\t%d goterms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
+
+    return train_mat, test_mat, goterms_passing_cutoff
+
+
 def write_stats_file(alg_runners, params_results, **kwargs):
     # for each alg, write the params_results
     # if --forcealg was set, then thsi will be overwritten. Otherwise, append to it
@@ -355,6 +403,8 @@ def write_stats_file(alg_runners, params_results, **kwargs):
             continue
         out_file = "%s-stats.txt" % (run_obj.out_pref)
         print("Writing stats to %s" % (out_file))
+        # make sure the output directory exists
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         # write the stats of this run. 
         with open(out_file, 'a') as out:
             # first write this runner's param_results
