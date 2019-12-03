@@ -5,6 +5,8 @@ import src.algorithms.alg_utils as alg_utils
 import numpy as np
 from scipy.sparse import csr_matrix, eye
 from scipy.sparse import linalg
+from tqdm import tqdm
+import sys
 
 
 def FastSinkSource(P, f, max_iters=1000, eps=0.0001, a=0.8, verbose=False):
@@ -39,18 +41,21 @@ def FastSinkSource(P, f, max_iters=1000, eps=0.0001, a=0.8, verbose=False):
             prev_s = s.copy()
         else:
             prev_s = s
-            if verbose:
-                print("\t\titer %d; %0.4f sec to update scores" % (iters, time.time() - update_time))
+            #if verbose:
+            #    print("\t\titer %d; %0.4f sec to update scores" % (iters, time.time() - update_time))
 
     wall_time = time.time() - wall_time
     process_time = time.process_time() - process_time
-    if verbose:
-        print("SinkSource converged after %d iterations (%0.3f wall time (sec), %0.3f process time)" % (iters, wall_time, process_time))
+    #if verbose:
+    #    print("SinkSource converged after %d iterations (%0.3f wall time (sec), %0.3f process time)" % (iters, wall_time, process_time))
 
     return s, process_time, wall_time, iters
 
 
-def runFastSinkSource(P, positives, negatives=None, max_iters=1000, eps=0.0001, a=0.8, verbose=False):
+def runFastSinkSource(
+        P, positives, negatives=None,
+        max_iters=1000, eps=0.0001, a=0.8,
+        tol=1e-5, solver=None, Milu=None, verbose=False):
     """
     *P*: Network as a scipy sparse matrix. Should already be normalized
     *positives*: numpy array of node ids to be used as positives
@@ -70,31 +75,62 @@ def runFastSinkSource(P, positives, negatives=None, max_iters=1000, eps=0.0001, 
     newP, f, = alg_utils.setup_fixed_scores(
         P, positives, negatives, a=a, remove_nonreachable=False)
 
-    if max_iters > 0:
+    #if max_iters > 0:
+    if solver is None:
         s, process_time, wall_time, num_iters = FastSinkSource(
             newP, f, max_iters=max_iters, eps=eps, a=a, verbose=verbose)
     else:
         # Solve for s directly. Scipy uses the form Ax=b to solve for x
         # SinkSource equation: (I - aP)s = f
-        # TODO add an option to specify which solver to use
-        # spsolve basically stalls for denser networks (e-value cutoff 0.1)
-        solver = "spsolve"
+        #solvers = ['bicg', 'bicgstab', 'cg', 'cgs', 'gmres', 'lgmres', 'minres', 'qmr', 'gcrotmk']#, 'lsmr']
         # eye is the identity matrix
-        A = eye(P.shape[0]) - a*P
+        #M = eye(P.shape[0]) - a*P
+        M = eye(newP.shape[0]) - a*newP
+
+        # keep track of the number of iterations
+        def callback(xk):
+            # keep the reference to the variable within the callback function (Python 3)
+            nonlocal num_iters
+            num_iters += 1
+
         # this measures the amount of time taken by all processors
         start_process_time = time.process_time()
         # this measures the amount of time that has passed
         start_wall_time = time.time()
+        num_iters = 0
+        # spsolve basically stalls for large or dense networks (e.g., e-value cutoff 0.1)
         if solver == 'spsolve':
-            num_iters = 0
-            s = linalg.spsolve(A, f)
+            s = linalg.spsolve(M, f)
+        elif solver == 'bicg':
+            s, info = linalg.bicg(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'bicgstab':
+            s, info = linalg.bicgstab(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'cg':
+            s, info = linalg.cg(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'cgs':
+            s, info = linalg.cgs(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'gmres':
+            s, info = linalg.gmres(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'lgmres':
+            s, info = linalg.lgmres(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'minres':
+            s, info = linalg.minres(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'qmr':
+            s, info = linalg.qmr(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        elif solver == 'gcrotmk':
+            s, info = linalg.gcrotmk(M, f, tol=tol, maxiter=max_iters, M=Milu, callback=callback)
+        #elif solver == 'lsmr':
+        #    s, info = linalg.lsmr(M, f, maxiter=max_iters, callback=callback)
+
         process_time = time.process_time() - start_process_time 
         wall_time = time.time() - start_wall_time
         if verbose:
             print("Solved SS using %s (%0.3f sec, %0.3f process time). %s" % (
                 solver, wall_time, process_time, 
-                "iters: %d, max_iters: %d" % (num_iters, 1000) if solver == 'cg' else ''))
+                "iters: %d, max_iters: %d, info: %s" % (
+                    num_iters, 1000, info) if solver != 'spsolve' else ''))
 
+    #sys.exit()
     # map back from the indices after deleting pos/neg to the original indices
     ## the positives will be left as 1, and the rest of the unknown examples will get their score below
     #scores_arr = np.ones(num_nodes)
