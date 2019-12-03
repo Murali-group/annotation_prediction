@@ -60,15 +60,16 @@ def main(config_map, out_pref='', **kwargs):
     #print(df[['#goterm', 'iter', 'kendalltau']].head(200))
 
     # for each goterm, get the iteration at which kendalltau hits 95%, 99% and 100%
+    iter_70 = get_iteration_at_cutoff(df, 0.70, col_to_get='iter', cutoff_col='kendalltau', less_than=False)
     iter_80 = get_iteration_at_cutoff(df, 0.80, col_to_get='iter', cutoff_col='kendalltau', less_than=False)
     iter_90 = get_iteration_at_cutoff(df, 0.90, col_to_get='iter', cutoff_col='kendalltau', less_than=False)
     iter_95 = get_iteration_at_cutoff(df, 0.95, col_to_get='iter', cutoff_col='kendalltau', less_than=False)
     iter_99 = get_iteration_at_cutoff(df, 0.99, col_to_get='iter', cutoff_col='kendalltau', less_than=False)
     iter_100 = get_iteration_at_cutoff(df, 1.0, col_to_get='iter', cutoff_col='kendalltau', less_than=False)
     df_cutoffs = pd.DataFrame({
-        '0.80': iter_80, '0.90': iter_90, '0.95': iter_95,
-        '0.99': iter_99, '1.0': iter_100})
-    df_cutoffs = df_cutoffs[['0.80', '0.90', '0.95', '0.99', '1.0']]
+        '0.70': iter_70, '0.80': iter_80, '0.90': iter_90, 
+        '0.95': iter_95, '0.99': iter_99, '1.0': iter_100})
+    df_cutoffs = df_cutoffs[['0.70', '0.80', '0.90', '0.95', '0.99', '1.0']]
     #     - Also plot the total # of iterations it takes to fix all node ranks
     total_iters = df.groupby('goterm-taxon')['iter'].max()
     df_cutoffs['Fixed ordering'] = total_iters
@@ -85,13 +86,13 @@ def get_axes_to_plot():
     # insert a break into the plot to better show the small and large ranges
     f, (ax2, ax1) = plt.subplots(ncols=1, nrows=2, sharex=True, figsize=(5,4.5))
     plt.subplots_adjust(hspace=0.05)
-    return ax1, ax2
+    return f, ax1, ax2
 
 
 def plot(df_cutoffs, out_pref, alpha=0.95):
-    ax1, ax2 = get_axes_to_plot()
-    sns.boxplot(data=df_cutoffs, ax=ax1, order=["0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
-    sns.boxplot(data=df_cutoffs, ax=ax2, order=["0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
+    f, ax1, ax2 = get_axes_to_plot()
+    sns.boxplot(data=df_cutoffs, ax=ax1, order=['0.70', "0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
+    sns.boxplot(data=df_cutoffs, ax=ax2, order=['0.70', "0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
     # f, ax1 = plt.subplots()
     # sns.boxplot(df_cutoffs, ax=ax1)
 
