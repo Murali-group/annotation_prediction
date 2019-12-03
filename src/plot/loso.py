@@ -8,7 +8,7 @@ from tqdm import tqdm
 import numpy as np
 #import utils.file_utils as utils
 # also compute the significance of sinksource vs local
-from scipy.stats import kruskal, mannwhitneyu
+from scipy.stats import kruskal, mannwhitneyu, wilcoxon
 # plotting imports
 import matplotlib
 matplotlib.use('Agg')  # To save files remotely.
@@ -22,6 +22,7 @@ fss_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0,fss_dir)
 from src.plot import plot_utils
 from src.evaluate import eval_leave_one_species_out as eval_loso
+from src import setup_sparse_networks as setup
 import run_eval_algs
 
 
@@ -47,8 +48,16 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     df = df_all
     # also get the annotation matrix
     dataset, in_dir = input_settings['datasets'][0], input_settings['input_dir']
-    ann_obj, eval_ann_obj, goid_names_file = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
-    kwargs['goid_names_file'] = goid_names_file
+    # store the ann obj files so they don't have to be recreated each time
+    out_dir = "outputs/viz/loso/%s-%s/" % (
+            dataset['net_version'].split('/')[-1], dataset['exp_name'].split('/')[-1])
+    os.makedirs(out_dir, exist_ok=True)
+    ann_obj, eval_ann_obj = load_ann_datasets(
+            out_dir, dataset, in_dir, 
+            alg_settings, **kwargs)
+
+    #ann_obj, eval_ann_obj, goid_names_file = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
+    kwargs['goid_names_file'] = get_goid_names_file(in_dir, dataset)
     # if eval_ann_obj is specified, then use it to get stats instead of the ann_obj
     curr_ann_obj = eval_ann_obj if eval_ann_obj is not None else ann_obj
     # get the # ann per species
@@ -81,23 +90,37 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     #    title += " \n %d%s %s" % (
     #            num_terms, ' %s'%kwargs.get('only_terms_name', ''),
     #            "sp-term pairs" if kwargs['exp_type'] == 'loso' else 'terms')
-    kwargs['title'] = title
+    if not kwargs.get('for_paper'):
+        kwargs['title'] = title
 
     if out_pref is not None:
         print("out_pref: %s" % (out_pref))
+    kwargs['out_pref'] = out_pref
 
     #results_overview(ev_code_results, measures=measures, **kwargs) 
-    generate_plots(df, taxon_num_ann, goid_num_ann, 
-            out_pref, **kwargs) 
+    generate_plots(df, taxon_num_ann, goid_num_ann, **kwargs) 
 
 
 def load_annotations(dataset, input_dir, alg_settings, **kwargs):
-    # TODO don't need to load the net_obj
-    _, ann_obj, eval_ann_obj = run_eval_algs.setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
+    # don't need to load the net_obj, just get the prots from the node ids file
+    #_, ann_obj, eval_ann_obj = run_eval_algs.setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
+    net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], net_file) for net_file in \
+                dataset.get('net_files',[]) + dataset.get('string_net_files',[])]
+    # get the nodes from the network node-ids file
+    if dataset.get('multi_net'):
+        if 'node_ids_file' in dataset['net_settings']:
+            node_ids_file = dataset['net_settings']['node_ids_file']
+        else:
+            # get the node_ids_file using the file path that would've been created
+            string_cutoff = dataset['net_settings'].get('string_cutoff', 150) 
+            out_pref = "%s/sparse-nets/c%d-" % (os.path.dirname(net_files[0]), string_cutoff)
+            node_ids_file = "%snode-ids.txt" % (out_pref)
+    else:
+        node_ids_file = net_files[0].replace('.gz','.npz') + "-node-ids.txt"
+    print("Reading node ids file from %s" % (node_ids_file))
+    nodes = pd.read_csv(node_ids_file, header=None, index_col=None, sep='\t')[0].values
+    _, ann_obj, eval_ann_obj = run_eval_algs.load_annotations(nodes, dataset, input_dir, **kwargs)
 
-    pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
-    # pos-neg-bp-10-list.tsv
-    goid_names_file = pos_neg_file.replace("bp-",'').replace("-list","-summary-stats")
     #summary_file = "inputs/pos-neg/%s/pos-neg-10-summary-stats.tsv" % (curr_ev_codes)
     #kwargs['goid_names_file'] =  goid_names_file
     # if there are no annotations, then skip this dataset
@@ -116,6 +139,19 @@ def load_annotations(dataset, input_dir, alg_settings, **kwargs):
 #        if eval_ann_obj is not None:
 #            eval_ann_obj = experiments.youngs_neg(eval_ann_obj, obo_file, "%s/%s" % (input_dir,dataset['pos_neg_file']))
     return ann_obj, eval_ann_obj, goid_names_file
+
+
+def get_goid_names_file(input_dir, dataset):
+    pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
+    pos_neg_file = pos_neg_file.replace("bp-",'').replace("mf-",'')
+    # pos-neg-bp-10-list.tsv
+    if '-list' in pos_neg_file:
+        goid_names_file = pos_neg_file.replace("-list","-summary-stats")
+    elif '.gz' in pos_neg_file:
+        goid_names_file = pos_neg_file.replace(".tsv.gz","-summary-stats.tsv")
+    else:
+        goid_names_file = pos_neg_file.replace(".tsv","-summary-stats.tsv")
+    return goid_names_file
 
 
 def get_taxon_ann_counts(ann_obj, species_to_uniprot_idx, taxons, **kwargs):
@@ -163,15 +199,25 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
         out_file = "%sloso-%s-%dalgs%s.pdf" % (
                 out_pref, measure, df['Algorithm'].nunique(), kwargs.get('plot_postfix',''))
         stat_file = out_file.replace('.pdf', '-sig.txt')
-        # also get comparative p-values
-        sig_results, sig_species = eval_stat_sig(df, stat_file, measure=measure, sort_taxon_by_fmax=sort_taxon_by_fmax, **kwargs)
+        # get comparative p-values
+        # UPDATE: limit to taxons that have at least 5 terms
+        # TODO make an option for this
+        sp_term_cutoff = 3
+        df_taxon_cutoff = pd.concat(dfT for taxon, dfT in df.groupby('#taxon') \
+                                    if dfT['#goid'].nunique() < sp_term_cutoff)
+                                    #if dfT['#goid'].nunique() >= sp_term_cutoff)
+        sig_results, sig_species = eval_stat_sig(
+            df, stat_file, measure=measure,
+            sort_taxon_by_fmax=sort_taxon_by_fmax, **kwargs)
 
-        plot_fmax_eval(df, out_file, measure=measure, #title=title,
-                sort_taxon_by_fmax=sort_taxon_by_fmax, ann_stats=taxon_num_ann, 
-                sig_species=sig_species, **kwargs)
+        # only make this plot if there are < 20 species
+        if df_taxon_cutoff['#taxon'].nunique() < 20:
+            plot_fmax_eval(df_taxon_cutoff, out_file, measure=measure,  # title=title,
+                    sort_taxon_by_fmax=sort_taxon_by_fmax, ann_stats=taxon_num_ann, 
+                    sig_species=sig_species, **kwargs)
+        else:
+            print("skipping species-specific distributions since %d species > 20" % (df_taxon_cutoff['#taxon'].nunique()))
 
-        # also write them to a file
-        #out_dir_stats = "%s/stats/" % (out_pref)
         out_file = "%s/stats/loso-%s-%s-%s%s.pdf" % (
                 out_pref, measure, kwargs['alg1'], kwargs['alg2'], kwargs.get('plot_postfix',''))
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
@@ -180,7 +226,7 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
 
 
 def eval_stat_sig(
-        df_curr, out_file, measure='fmax', 
+        df_curr, out_file, measure='fmax', sp_term_cutoff=5, 
         sort_taxon_by_fmax=None, alg1='fastsinksource', alg2='localplus', **kwargs):
     sp_pval = {}
     out_str = ""
@@ -192,27 +238,37 @@ def eval_stat_sig(
     for a1, a2 in combinations:
         a1_fmax = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a1, a1)][measure]
         a2_fmax = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a2, a2)][measure]
-        test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
+        #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
+        test_statistic, pval = wilcoxon(a1_fmax, a2_fmax, alternative='greater') 
         out_str += "%s\t%s\t%0.3e\t%0.3e\n" % (a1, a2, pval, pval*len(combinations))
 
     # also compare individual species
     curr_species = df_curr['#taxon'].unique()
+    # limit the species for which we run the test to those that have at least 5 terms
+    species_with_terms = set([s for s, df_s in df_curr.groupby('#taxon') \
+                              if df_s['#goid'].nunique() >= sp_term_cutoff])
+    print("%d species with at least %d terms" % (len(species_with_terms), sp_term_cutoff))
     if sort_taxon_by_fmax is not None:
         curr_species = sort_taxon_by_fmax
-    out_str += "Species\tAlg1\tAlg2\tAlg1-med\tAlg2-med\tRaw p-value\tCorrected p-value (x%d)\n" % (len(curr_species))
+    out_str += "Species\tAlg1\tAlg2\tAlg1-med\tAlg2-med\tRaw p-value\tCorrected p-value (x%d)\n" % (len(species_with_terms))
     for s in curr_species:
         #name = f_settings.NAME_TO_SHORTNAME2.get(selected_species[str(s)],'-')
         name = kwargs['sp_names'].get(str(s),'-') if 'sp_names' in kwargs else '-'
         df_s = df_curr[df_curr['#taxon'] == s]
         a1_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg1, alg1)][measure]
         a2_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg2, alg2)][measure]
-        try:
-            test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
-            line = "%s\t%s\t%s\t%0.3f\t%0.3f\t%0.2e\t%0.2e" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median(), pval, pval*len(curr_species))
-        except ValueError:
+        if s in species_with_terms:
+        #try:
+            #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
+            # TODO requires an updated version of scipy
+            test_statistic, pval = wilcoxon(a1_fmax, a2_fmax, alternative='greater') 
+            line = "%s\t%s\t%s\t%0.3f\t%0.3f\t%0.2e\t%0.2e" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median(), pval, pval*len(species_with_terms))
+            sp_pval[s] = pval
+        # this only really happens when there is only 1 or two terms with the same fmax
+        #except ValueError:
+        else:
             line = "%s\t%s\t%s\t%0.3f\t%0.3f\t-\t-" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median())
             pval = 1
-        sp_pval[s] = pval
         out_str += line+'\n'
 
     if kwargs.get('forceplot') or not os.path.isfile(out_file):
@@ -226,15 +282,16 @@ def eval_stat_sig(
     # now check how many are significant
     sig_species = set()
     for s, pval in sp_pval.items():
-        if pval*len(curr_species) < 0.05:
+        # TODO implement the BH correction
+        if pval*len(species_with_terms) < 0.05:
             sig_species.add(s)
-    print("\t%d species with pval*%d < 0.05" % (len(sig_species), len(curr_species)))
+    print("\t%d species with pval*%d < 0.05" % (len(sig_species), len(species_with_terms)))
     return sp_pval, sig_species
 
 
 def plot_fmax_eval(
-    df_curr, out_file, measure='fmax', 
-    sort_taxon_by_fmax=None, ann_stats=None, sig_species=None, **kwargs):
+        df_curr, out_file, measure='fmax', sort_taxon_by_fmax=None,
+        ann_stats=None, sig_species=None, **kwargs):
     """
     *ann_stats*: Set of annotation types (either 'EXP', 'COMP' or 'IEA') for which a boxplot will be added to the right # of annotations
     *for_pub*: If true, the title at the top will not be included
@@ -242,15 +299,18 @@ def plot_fmax_eval(
     if kwargs.get('forceplot') or not os.path.isfile(out_file):
         print("Writing figure to %s" % (out_file))
     else:
-        print("File would be written to %s" % (out_file))
+        print("Already exists: %s Use --forceplot to overwrite" % (out_file))
         return
+    # flip the x and y of the axis
+    horiz = kwargs.get('horizontal')
     algs = kwargs.get('algs', df_curr['Algorithm'].unique())
     # add the species name to the boxplot
     species_labels = {}
     for s in df_curr['#taxon']:
         species = kwargs['sp_abbrv'].get(str(s),s) if 'sp_abbrv' in kwargs else s
-        species_labels[s] = "%s. (%d)" % (
-            species, df_curr[df_curr['#taxon'] == s]['#goid'].nunique())
+        species_labels[s] = "%s.%s(%d)" % (
+            species, ' ' if not horiz else '\n',
+            df_curr[df_curr['#taxon'] == s]['#goid'].nunique())
     species_labels = pd.Series(species_labels)
     df_curr['species'] = df_curr['#taxon'].apply(lambda x: species_labels[x])
     df_curr = df_curr.sort_values(by=['species', 'Algorithm'], ascending=[True, False])
@@ -262,37 +322,71 @@ def plot_fmax_eval(
     df_curr['#taxon'].cat.set_categories(sort_taxon_by_fmax, inplace=True)
     sort_by_med_fmax = df_curr.sort_values(by='#taxon')['species'].unique()
 
-    xlabel = measure_map.get(measure, measure.upper())
-    ylabel = 'Species (# GO Terms)'
+    # and get the colors
+    curr_palette = [plot_utils.alg_colors[alg] for alg in algs]
 #         fig, ax = plt.subplots(figsize=(6,10))
 #         fig, ax = plt.subplots(figsize=(5,6))
-    #if ann_stats is not None and ('COMP' in ann_stats or 'ELEC' in ann_stats):
-    #    # make the figure taller to fit all the species
-    #    fig, ax = plt.subplots(figsize=(3.5,8))
-    #else:
-    fig, ax = plt.subplots(figsize=(3.5,6))
-    sns.boxplot(x=measure, y='species', order=sort_by_med_fmax, 
-#                     hue='Algorithm', data=df_curr, orient='h')
-               hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
-                data=df_curr, orient='h', fliersize=1.5,
-               palette=plot_utils.my_palette)
+    # make the figure taller to fit all the species
+    height = 8 if df_curr['#taxon'].nunique() > 21 else 6
+    # temporary fix to fit more algorithms
+    if len(algs) > 4:
+        height += 4
+    if horiz:
+        fig, ax = plt.subplots(figsize=(height,4))
+    else:
+        fig, ax = plt.subplots(figsize=(4,height))
+    x,y = measure, 'species'
+    if horiz:
+        sns.boxplot(x=y,y=x, order=sort_by_med_fmax[::-1], 
+                hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
+                data=df_curr, orient='v', fliersize=1.5,
+                palette=curr_palette, saturation=0.85)
+    else:
+        sns.swarmplot(x=x,y=y, order=sort_by_med_fmax, dodge=True,
+                    hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
+                    data=df_curr, orient='h', 
+                    palette=curr_palette)
+        #sns.boxplot(x=x,y=y, order=sort_by_med_fmax, 
+                    #data=df_curr, orient='h', fliersize=1.5,
     ax.set_title(kwargs['title'])
-    ax.set_xlabel(xlabel, fontsize=12, weight="bold")
-    ax.set_ylabel(ylabel, fontsize=12, weight="bold")
-    # now try and bold the yticklabels 
-    yticklabels = [item.get_text() for item in ax.get_yticklabels()]
-    for i, s in enumerate(df_curr.sort_values(by='#taxon')['#taxon'].unique()):
+    xlabel = measure_map.get(measure, measure.upper())
+    ylabel = 'Species (# GO Terms)'
+    if horiz:
+        xlabel,ylabel = ylabel,xlabel 
+    size = 16 if kwargs.get('for_paper') else 12
+    ax.set_xlabel(xlabel, fontsize=size, weight="bold")
+    ax.set_ylabel(ylabel, fontsize=size, weight="bold")
+    #plt.legend(bbox_to_anchor=(.3, 0.9))
+    # the ticklabels are the species names. 
+    # now try and bold the ones that are significant
+    ticklabels = ax.get_yticklabels() if not horiz else ax.get_xticklabels()
+    ticklabels = [item.get_text() for item in ticklabels]
+    print(ticklabels)
+    taxons = df_curr.sort_values(by='#taxon')['#taxon'].unique()
+    taxons = taxons[::-1] if horiz else taxons
+    for i, s in enumerate(taxons):
         # if this is not a significant species, then add latex to make it not bold
         if s not in sig_species:
-            yticklabels[i] = r"$\rm %s$" % (yticklabels[i]) 
-    ax.set_yticklabels(yticklabels, fontweight="bold")
-    plt.legend(bbox_to_anchor=(.3, 0.9))
-    ticks = np.arange(0,1.01,.1)
-    plt.setp(ax, xticks=ticks, xticklabels=["%0.1f"%x for x in ticks])
+            #ticklabels[i] = r"$\\rm %s$" % (ticklabels[i]) 
+            ticklabels[i] = "$\\rm %s$" % (
+                    ticklabels[i].replace('\n','$\n$'))
+    print(ticklabels)
+    ticks = np.arange(0,1.01,.2 if kwargs.get('for_paper') else 0.1)
+    if horiz:
+        ax.set_xticklabels(ticklabels, fontweight="bold")
+        plt.setp(ax, yticks=ticks, yticklabels=["%0.1f"%x for x in ticks])
+    else:
+        ax.set_yticklabels(ticklabels, fontweight="bold")
+        plt.setp(ax, xticks=ticks, xticklabels=["%0.1f"%x for x in ticks])
+    if kwargs.get('for_paper'):
+        ax.tick_params(axis='y', labelsize='large')
+        ax.tick_params(axis='x', labelsize='large')
+        # remove the legend title
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles=handles[:], labels=labels[:])
 
     if ann_stats is not None:
         # add another plot to the right that is a bar plot of the # of non-iea (or exp) annotations
-        right_ax = plt.axes([.95, .13, .2, .75])
         df_counts = pd.DataFrame(pd.Series(ann_stats))
         #df_counts = pd.DataFrame([ann_stats])
             #df_counts = pd.DataFrame([ann_stats[ev_code]]).T
@@ -302,16 +396,29 @@ def plot_fmax_eval(
         df_counts.index = range(len(df_counts.index))
         df_counts = pd.melt(df_counts, id_vars="#taxon", var_name="Ev. codes", value_name="# ann")
         df_counts['species'] = df_counts['#taxon'].apply(lambda x: species_labels[int(x)])
-        sns.barplot(y='species', x='# ann', hue="Ev. codes", order=list(sort_by_med_fmax), 
-                    data=df_counts, orient='h', ax=right_ax, #palette="OrRd_d") 
-                    #color="#9c6d57", saturation=1) # use a brown color
+        y,x = ('species','# ann')
+        if horiz:
+            right_ax = plt.axes([.125, .9, .775, .125])
+            sns.barplot(x=y, y=x, data=df_counts, ax=right_ax, 
+                    hue="Ev. codes", order=list(sort_by_med_fmax)[::-1], 
+                    orient='v',
                     palette=["#9c6d57"], saturation=0.95, edgecolor='k')
-        change_width(right_ax, 0.45)
-        right_ax.set_ylabel("")
-        right_ax.set_yticks([])
+        else:
+            right_ax = plt.axes([.95, .13, .2, .75])
+            sns.barplot(x=x, y=y, data=df_counts, ax=right_ax, 
+                    hue="Ev. codes", order=list(sort_by_med_fmax), 
+                    orient='h',
+                    palette=["#9c6d57"], saturation=0.95, edgecolor='k')
+        change_width(right_ax, 0.45, horiz=horiz)
+        xlabel,ylabel = ("","# Ann") if horiz else ("# Ann","")
+        right_ax.set_ylabel(ylabel)
+        right_ax.set_xlabel(xlabel)
+        if horiz:
+            right_ax.set_xticks([])
+        else:
+            right_ax.set_yticks([])
         if df_counts['Ev. codes'].nunique() < 2:
             right_ax.get_legend().remove()
-            right_ax.set_xlabel("# Ann")
         # TODO add the ev_code type 
         #else:
         #    right_ax.set_xlabel("# Ann")
@@ -399,11 +506,11 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
     #    # plt.suptitle('%s, %s, %s-%s \n %d species' % (version, ev_codes, cutoff1, cutoff2, df_h_infl['#taxon'].nunique()))
 
     # I can explicitly make the top and right histograms this way
-    g = sns.JointGrid(x=alg1_col, y=diff_col, data=df)
+    g = sns.JointGrid(x=alg1_col, y=diff_col, data=df, height=4.5)
     g.ax_marg_x.hist(df[alg1_col], bins=10, alpha=0.7)
     g.ax_marg_y.hist(df[diff_col], bins=30, 
             orientation="horizontal", alpha=0.7)
-    g = g.plot_joint(plt.scatter, s=20)
+    g = g.plot_joint(plt.scatter, s=15)
     plt.tight_layout()
     #g.fig.set_figwidth(5)
     #g.fig.set_figheight(5)
@@ -413,8 +520,14 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
     measure = measure_map.get(measure, measure.upper())
     xlabel = r'%s %s'%(alg1,measure)
     ylabel = r'%s - %s %s'%(alg1, alg2, measure)
-    plt.xlabel(xlabel, fontsize=12, weight="bold")
-    plt.ylabel(ylabel, fontsize=12, weight="bold")
+    size = 16 if kwargs.get('for_paper') else 12
+    plt.xlabel(xlabel, fontsize=size, weight="bold")
+    plt.ylabel(ylabel, fontsize=size, weight="bold")
+    if kwargs.get('for_paper'):
+        plt.tick_params(axis='y', labelsize='large')
+        plt.tick_params(axis='x', labelsize='large')
+        ticks = np.arange(0,1.01,.2)
+        plt.xticks(ticks, labels=["%0.1f"%x for x in ticks])
 
     if kwargs.get('forceplot') or not os.path.isfile(out_file):
         print("Writing to %s" % (out_file))
@@ -426,17 +539,67 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
 
 
 # change the width of the extra bar plot to the side
-def change_width(ax, new_value):
+def change_width(ax, new_value, horiz=False):
     for patch in ax.patches:
-        current_width = patch.get_height()
-#         print(current_width)
-        diff = current_width - new_value
+        if horiz:
+            current_width = patch.get_width()
+            diff = current_width - new_value
+            # we change the bar width
+            patch.set_width(new_value)
+            # we recenter the bar
+            patch.set_x(patch.get_x() + diff * .5 + 0.08)
+        else:
+            current_width = patch.get_height()
+            diff = current_width - new_value
+            # we change the bar width
+            patch.set_height(new_value)
+            # we recenter the bar
+            patch.set_y(patch.get_y() + diff * .5 + 0.08)
 
-        # we change the bar width
-        patch.set_height(new_value)
 
-        # we recenter the bar
-        patch.set_y(patch.get_y() + diff * .5 + 0.08)
+def load_ann_datasets(
+        out_dir, dataset, input_dir, 
+        alg_settings, **kwargs):
+    sparse_ann_file = "%s/pos-ann.npz" % (out_dir)
+    sparse_ann_file_eval = "%s/eval-pos-ann.npz" % (out_dir)
+    if not kwargs.get('forcenet') and \
+            os.path.isfile(sparse_ann_file):
+        ann_obj = load_ann_obj(sparse_ann_file)
+        eval_ann_obj = None 
+        if dataset.get('pos_neg_file_eval'):
+            eval_ann_obj = load_ann_obj(sparse_ann_file_eval)
+    else:
+        _, ann_obj, eval_ann_obj = run_eval_algs.setup_dataset(
+                dataset, input_dir, alg_settings, **kwargs)
+        store_ann_obj(ann_obj, sparse_ann_file, pos_only=True)
+        if eval_ann_obj is not None:
+            store_ann_obj(eval_ann_obj, sparse_ann_file_eval, pos_only=True)
+        # now store them to a file
+    return ann_obj, eval_ann_obj
+
+
+def load_ann_obj(sparse_ann_file):
+    print("\nReading annotation matrix from %s" % (sparse_ann_file))
+    loaded_data = np.load(sparse_ann_file, allow_pickle=True)
+    dag_matrix = setup.make_csr_from_components(loaded_data['arr_0'])
+    ann_matrix = setup.make_csr_from_components(loaded_data['arr_1'])
+    goids, prots = loaded_data['arr_2'], loaded_data['arr_3']
+    ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, prots)
+    return ann_obj
+
+
+def store_ann_obj(ann_obj, sparse_ann_file, pos_only=False):
+    print("Writing sparse annotations to %s" % (sparse_ann_file))
+    if pos_only:
+        print("\tpositive examples only")
+        ann_obj.ann_matrix = (ann_obj.ann_matrix > 0).astype(int)
+        ann_obj.ann_matrix.eliminate_zeros() 
+    # store all the data in the same file
+    dag_matrix_data = setup.get_csr_components(ann_obj.dag_matrix)
+    ann_matrix_data = setup.get_csr_components(ann_obj.ann_matrix)
+    np.savez_compressed(
+        sparse_ann_file, dag_matrix_data, 
+        ann_matrix_data, ann_obj.goids, ann_obj.prots)
 
 
 def setup_parser(parser=None):
