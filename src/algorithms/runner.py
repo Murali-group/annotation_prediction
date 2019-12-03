@@ -24,6 +24,7 @@ LibMapper = {
     'local': fastsinksource,
     'localplus': fastsinksource,
     'genemania': genemania,
+    'genemaniaplus': genemania,
     'aptrank': birgrank,
     'birgrank': birgrank,
 }
@@ -56,7 +57,6 @@ class Runner(object):
         params.pop('should_run', None)  # remove the should_run parameter
         self.params = params
         self.kwargs = kwargs
-        self.out_pref = kwargs.get('out_pref', '')
         self.verbose = kwargs.get('verbose', False) 
         self.forced = kwargs.get('forcealg', False) 
         # for term-based algorithms, can limit the goids for which they will be run
@@ -72,9 +72,11 @@ class Runner(object):
 
         # keep track of the weighting method for writing to the output file later
         self.setupParamsStr(net_obj.weight_str, params, name)
+        self.out_pref = kwargs.get('out_pref', self.out_dir+'pred-scores'+self.params_str)
 
 
-    # if the method is not in Python and needs to be called elsewhere, use this
+    # if the algorithm is not inmplemented in Python (e.g., MATLAB, R)
+    # use this function to setup files and such
     def setupInputs(self):
         return LibMapper[self.name].setupInputs(self)
 
