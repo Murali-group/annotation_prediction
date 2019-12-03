@@ -8,11 +8,13 @@ import sys
 #import time
 import numpy as np
 #from scipy import sparse
-from scipy.stats import kruskal, mannwhitneyu
+from scipy.stats import kruskal, mannwhitneyu, wilcoxon
+import networkx as nx
 # plotting imports
 import matplotlib
 matplotlib.use('Agg')  # To save files remotely. 
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import pandas as pd
 import seaborn as sns
 # make this the default for now
@@ -29,10 +31,14 @@ sns.set_style('darkgrid')
 #sys.path.append(base_path + "/src/algorithms")
 #print(sys.path)
 #import runner
+# my local imports
+fss_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0,fss_dir)
 import run_eval_algs
 import src.algorithms.runner as runner
 import src.utils.file_utils as utils
 import src.evaluate.eval_utils as eval_utils
+import src.go_term_prediction_examples.go_term_prediction_examples as go_examples
 
 
 ALG_NAMES = {
@@ -50,7 +56,28 @@ param_map = {'alpha': r'$\rm \alpha$'}
 
 # tried to be fancy :P
 # colors: https://coolors.co/ef6e4a-0ec9aa-7c9299-5d88d3-96bd33
-my_palette = ["#EF6E4A", "#0EC9AA", "#7C9299", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
+#my_palette = ["#EF6E4A", "#0EC9AA", "#7C9299", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
+# changed birgrank (third) to purple
+my_palette = ["#EF6E4A", "#0EC9AA", "#8e71d0", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
+alg_colors = {
+    'fastsinksource': my_palette[0],
+    'genemania': my_palette[1],
+    'birgrank': my_palette[2],
+    'localplus': my_palette[3],
+    'sinksource': my_palette[4],
+    }
+# default list of markers
+my_shapes = ['o', 's', 'P', '^', 'x', '*', '+', 'v', 'x',]
+alg_shapes = {
+    'fastsinksource': 'o',
+    'genemania': 's',
+    'birgrank': 'P',
+    'localplus': '^',
+    'sinksource': 'x',
+    }
+for alg, color in alg_colors.copy().items():
+    alg_colors[ALG_NAMES[alg]] = color
+    alg_shapes[ALG_NAMES[alg]] = alg_shapes[alg]
 # for comparing sinksource with local
 #my_palette = ["#EF6E4A", sns.xkcd_rgb["deep sky blue"], "#96BD33", "#937860", "#efd2b8"]
 #my_palette = [sns.xkcd_rgb["orange"], sns.xkcd_rgb["azure"], "#96BD33", "#937860", "#efd2b8"]
@@ -81,7 +108,10 @@ def setup_opts():
                      help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
     group.add_argument('--only-terms-name', type=str, default='',
                      help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
-    group.add_argument('--postfix', type=str, default='',
+    group.add_argument('--most-specific-terms', action='store_true', default=False,
+                     help="If 'loso' is specified for --exp-type, then for each species, " + \
+                          "show results for only the most specific terms")
+    group.add_argument('--postfix', type=str, 
                      help="Postfix to add to the end of the files")
 
     # plotting parameters
@@ -92,6 +122,8 @@ def setup_opts():
                      help="Compare all runners in the config file using a boxplot")
     group.add_argument('--line', action='store_true', default=False,
                      help="Compare all runners on all datasets in the config file using a lineplot")
+    group.add_argument('--ci', type=float,
+                     help="Show the specified confidence interval (between 0 and 100) for the line plot")
     group.add_argument('--scatter', action='store_true', default=False,
                      help="Make a scatterplot, or pair plot if more than two runners are given." +
                      "If the # ann are given with --term-stats, then plot the fmax by the # ann")
@@ -131,7 +163,8 @@ def setup_opts():
 
 def load_config_file(config_file):
     with open(config_file, 'r') as conf:
-        config_map = yaml.load(conf, Loader=yaml.FullLoader)
+        #config_map = yaml.load(conf, Loader=yaml.FullLoader)
+        config_map = yaml.load(conf)
     return config_map
 
 
@@ -159,6 +192,11 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     input_settings, alg_settings, output_settings, out_pref, kwargs = setup_variables(
         config_map, out_pref, **kwargs)
     kwargs['out_pref'] = out_pref
+    if kwargs['out_pref'] is not None:
+        kwargs['out_pref'] += kwargs.get('plot_postfix', '') 
+    if kwargs.get('most_specific_terms') and not kwargs.get('only_terms_name'):
+        kwargs['only_terms_name'] = "most specific"
+    print(kwargs)
 
     # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
@@ -208,18 +246,26 @@ def main(config_map, ax=None, out_pref='', **kwargs):
                     "sp-term pairs" if kwargs['exp_type'] == 'loso' else 'terms')
         kwargs['title'] = title
         kwargs['alg_params'] = alg_settings
+        kwargs['algs'] = get_algs_to_run(alg_settings, **kwargs)
+        # if no algs were specified and the yaml file default algs were used, 
+        # then update the list of algs here
+        #if kwargs['algs'] is None:
+
 
         # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
         for measure in kwargs['measures']:
             # also check the statistical significance options
             if kwargs['compare_param'] and kwargs['max_val']:
                 compute_param_stat_sig(df_all, measure=measure, **kwargs)
-            if kwargs['boxplot']:
-                ax = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
             if kwargs['scatter']:
                 ax = plot_scatter(df_all, measure=measure, ax=ax, **kwargs) 
             if kwargs['line']:
                 ax = plot_line(df_all, measure=measure, ax=ax, **kwargs)
+            if kwargs['boxplot']:
+                if df_all['plot_exp_name'].nunique() > 1:
+                    ax = plot_multi_boxplot(df_all, measure=measure, ax=ax, **kwargs)
+                else:
+                    ax = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
     return ax
 
 
@@ -231,6 +277,7 @@ def setup_variables(config_map, out_pref='', **kwargs):
     #input_dir = input_settings['input_dir']
     alg_settings = config_map['algs']
     output_settings = config_map['output_settings']
+    # update the settings specified in this script with those set in the yaml file
     if config_map.get('eval_settings'):
         kwargs.update(config_map['eval_settings'])
     if config_map.get('plot_settings'):
@@ -249,12 +296,16 @@ def setup_variables(config_map, out_pref='', **kwargs):
             df_stats_all = pd.concat([df_stats_all, df_stats])
         kwargs['term_stats'] = df_stats_all
 
+    # if no postfix was set in the yaml file or in this script, then set it to empty
+    if kwargs.get('postfix') is None:
+        kwargs['postfix'] = ''
+
     if out_pref == "":
         out_pref = "%s/viz/%s/%s/" % (
                 output_settings['output_dir'], 
                 input_settings['datasets'][0]['net_version'], 
                 input_settings['datasets'][0]['exp_name'])
-    if kwargs['only_terms_file'] is not None:
+    if kwargs.get('only_terms_file') is not None:
         only_terms = pd.read_csv(kwargs['only_terms_file'], sep='\t', index_col=None)
         only_terms = only_terms.iloc[:,0].values
         print("limitting to %d terms from %s" % (len(only_terms), kwargs['only_terms_file']))
@@ -279,11 +330,11 @@ def savefig(out_file, **kwargs):
     plt.close()
 
 
-def set_labels(ax, title, xlabel, ylabel, **kwargs):
+def set_labels(ax, title, xlabel, ylabel, axis_fontsize=11, **kwargs):
     xlabel, ylabel = (ylabel, xlabel) if kwargs.get('horizontal') else (xlabel, ylabel)
     if kwargs.get('for_paper'):
-        ax.set_xlabel(xlabel, fontsize=11, weight="bold")
-        ax.set_ylabel(ylabel, fontsize=11, weight="bold")
+        ax.set_xlabel(xlabel, fontsize=axis_fontsize, weight="bold")
+        ax.set_ylabel(ylabel, fontsize=axis_fontsize, weight="bold")
         ax.set_title(title, fontsize=18, weight="bold")
     else:
         ax.set_xlabel(xlabel)
@@ -292,33 +343,86 @@ def set_labels(ax, title, xlabel, ylabel, **kwargs):
 
 
 def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    # default list of markers
-    markers = ['o', 's', 'P', '^', 'X', '*', '+', 'v', 'x',]
     #print(df[[measure, 'plot_exp_name', 'Algorithm']].head())
     x,y = measure, 'plot_exp_name'
     # flip the x and y axis if specified
     x,y = (y,x) if kwargs.get('horizontal') else (x,y)
     #print(df.columns)
     df = df[[x,y, 'Algorithm']]
+    algs = df['Algorithm'].unique()
+    try:
+        # If there are algorithms which don't have a set shape or color, this will fail
+        curr_palette = [alg_colors[alg] for alg in algs]
+        curr_markers = [alg_shapes[alg] for alg in algs]
+    except KeyError:
+        curr_palette = my_palette
+        curr_markers = my_shapes 
     #print(df.head())
     #df = df.pivot(columns='Algorithm', values=[x,y])
     #print(df.head())
+    if ax is None:
+        if kwargs['horizontal']: 
+            f, ax = plt.subplots(figsize=(6,5))
+        else:
+            f, ax = plt.subplots(figsize=(4,6))
+    if kwargs.get('for_paper'):
+        # make the fonts bigger
+        matplotlib.rc('xtick', labelsize=18) 
+        matplotlib.rc('ytick', labelsize=18) 
 
     # doesn't work for categorical data
     #sns.lineplot(x=measure, y='pen-alg', data=df, ax=ax,
-    ax = sns.pointplot(
-        x=x, y=y, data=df, hue='Algorithm', estimator=np.median, ci=None,
-        #data=df, hue='Algorithm', estimator=np.median, ci=None,
-        ax=ax, markers=markers,  # order=[kwargs['alg_names'][a] for a in algorithms],
-        palette=my_palette,
-                )
-    plt.setp(ax.lines,linewidth=1)  # set lw for all lines of g axes
-    if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[-1]) > 20:
-        ax.tick_params(axis='x', rotation=45)
+    if kwargs.get('ci'):
+        ax = sns.pointplot(
+            x=x, y=y, data=df, hue='Algorithm', hue_order=algs, estimator=np.median,  # ci=None,
+            dodge=0.6, join=False, ci=kwargs['ci'], 
+            ax=ax, markers=curr_markers, palette=curr_palette)
+        # also make a table for the row names
+        # and to alternate the grid colors
+    else:
+        ax = sns.pointplot(
+            x=x, y=y, data=df, hue='Algorithm', estimator=np.median, ci=None,
+            ax=ax, markers=curr_markers,  # order=[kwargs['alg_names'][a] for a in algorithms],
+            palette=curr_palette)
 
-    xlabel = "Median %s" % (measure_map.get(measure, measure.upper()))
+    plt.setp(ax.lines,linewidth=1)  # set lw for all lines of g axes
+    if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[-1]) > 10:
+        ax.tick_params(axis='x', rotation=45)
+        ax.tick_params(axis='y', labelsize='large')
+
+    # TODO add an option for this
+    if kwargs.get('for_paper') and kwargs.get('horizontal'):
+        # add alternating colors for the columns
+        num_cols = df[x].nunique()
+        add_alternating_columns(ax, num_cols) 
+
+        # add the table below the figure
+        ax_below = add_net_combination_table(ax, df[x].unique())
+        # and also add alternating columns for this table
+        add_alternating_columns(ax_below, num_cols) 
+        # remove the extra space on the ends of the x axis
+        x1, x2 = ax.get_xlim()
+        ax.set_xlim(int(x1)-0.5, int(x2)+0.5)
+
+    ## change the fmax axis to be between 0 and 1
+#    if kwargs.get('for_paper'):
+#        # TODO add an option for this:
+#        #x1, x2 = kwargs.get('ax_limit',(0.6, 0.8))
+#        x1, x2 = kwargs.get('ax_limit',(0.34, 0.72))
+#        if kwargs['horizontal']: 
+#            #ax.set_ylim(-0.02, 1.02)
+#            #ax.set_ylim(0.28, 0.72)
+#            ax.set_ylim(x1,x2)
+#            # set the yticks
+#            #ax.set_yticks(np.arange(x1,x2,0.02))
+#            #ax.set_yticks(np.arange(x1,x2,0.05))
+#        else:
+#            ax.set_xlim(x1, x2)
+
+    xlabel = "%s" % (measure_map.get(measure, measure.upper()))
     ylabel = kwargs.get('exp_label', '')
-    set_labels(ax, title, xlabel, ylabel, **kwargs)
+    axis_fontsize = 18 if kwargs.get('for_paper') else 11
+    set_labels(ax, title, xlabel, ylabel, axis_fontsize=axis_fontsize, **kwargs)
 
     if out_pref is not None:
         out_file = "%s%s-line.pdf" % (out_pref, measure)
@@ -326,19 +430,124 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
     return ax
 
 
+def add_alternating_columns(ax, num_cols, gray="#d1d1d9"):
+    for i in range(num_cols):
+        if i % 2:
+            #ax.axvline(i, linewidth=1, color=gray, zorder=0)
+            #ptch = patches.Rectangle(
+            #    (i-0.5,0),
+            #    width=1,
+            #    height=1,
+            #    edgecolor=gray,
+            #    facecolor=gray,
+            #    zorder=0)
+            #ax.add_artist(ptch)
+            ax.axvspan(
+                i-0.5, i+0.5,
+                facecolor=gray, edgecolor=gray,
+                zorder=0)
+
+
+def add_net_combination_table(ax, plot_exp_names, checkmark="✓"):
+    # make the subplot 1/4 the size of the original
+    ax_below = ax.get_figure().add_subplot(4,1,4, sharex=ax)
+    box = ax_below.get_position()
+    # move the axes below the current figure
+    ax_below.set_position([box.x0, box.y0-0.18, box.width, box.height])
+    # now add the checkmarks
+    net_types = [
+        'ssnT',
+        'ssnLocal',
+        'ssnC',
+        'stringT',
+        'stringC',
+    ][::-1]
+    # change the labels here
+    net_type_labels = {
+        'ssnT': 'SSN-T',
+        'ssnLocal': 'SSN-Neighbors',
+        'ssnC': 'SSN-C',
+        'stringT': 'STRING-T',
+        'stringC': 'STRING-C',
+        }
+    for x, plot_exp_name in enumerate(plot_exp_names):
+        #print(plot_exp_name)
+        for y, net_type in enumerate(net_types):
+            if net_type in plot_exp_name:
+                #print("\t%s (%s)" % (net_type, y))
+                ax_below.text(x-0.1, y+0.05, checkmark, fontsize="14")
+    # set the tick labels as the network combination types
+    ax_below.set_yticklabels(
+        [net_type_labels[net_type] for net_type in net_types]+[""],
+        fontsize="14")
+    for label in ax_below.yaxis.get_majorticklabels():
+        # this is a trick to get the tick label to be between the grid lines
+        label.set_verticalalignment('bottom')
+
+    ax_below.set_yticks(list(range(0,5)))
+    ax_below.set_ylim(-0.05, 5)
+    ax_below.xaxis.grid(False)
+    ax_below.set_xticklabels([""]*len(plot_exp_names))
+    return ax_below
+
+
+def plot_multi_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
+    algs = df['Algorithm'].unique()
+    try:
+        # If there are algorithms which don't have a set shape or color, this will fail
+        curr_palette = [alg_colors[alg] for alg in algs]
+        curr_markers = [alg_shapes[alg] for alg in algs]
+    except KeyError:
+        curr_palette = my_palette
+        curr_markers = my_shapes 
+
+    if kwargs['for_paper'] is True:
+        sns.set_style("darkgrid", {
+            'xtick.top': True, 'xtick.bottom': True, #'xtick.color': '.3',
+            #'grid.color': '.3', 'axes.labelcolor': '.15',
+            #'axes.edgecolor': '.3',
+            'axes.spines.bottom': True, 'axes.spines.left': True,
+            'axes.spines.right': True, 'axes.spines.top': True,})
+    df['Algorithm'] = df['Algorithm'].astype(str)
+    df = df[['Algorithm', measure, 'plot_exp_name']]
+    g = sns.catplot(x=measure, y='Algorithm', row='plot_exp_name', data=df,  # hue='Algorithm',
+                    height=1., aspect=4, palette=curr_palette, 
+                    #orient='v' if not kwargs.get('horizontal') else 'h',
+                    kind='box',)
+                    #kind="violin", cut=0, inner='quartile',)
+    # put less space between the plots
+    g.fig.subplots_adjust(hspace=.05)
+    g.set(xticks=np.arange(0,11)*0.1)
+    if kwargs['for_paper'] is True:
+        g.set_ylabels("")
+        g.set_titles("")
+        g.fig.tight_layout()
+        xlabel = measure_map.get(measure, measure.upper())
+        g.set_xlabels(xlabel)
+
+    if out_pref is not None:
+        out_file = "%s%s-multi-boxplot.pdf" % (out_pref, measure)
+        savefig(out_file, **kwargs)
+
+
 def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
     df['Algorithm'] = df['Algorithm'].astype(str)
     df = df[['Algorithm', measure]]
     #print(df.head())
+    df.reset_index(inplace=True)
     df = df.pivot(columns='Algorithm', values=measure)
     #print(df.head())
     #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
-    order = [kwargs['alg_names'][a] for a in kwargs['algs']]
     if kwargs.get('compare_param'):
         # we're not ordering the algorithms, but the parameters
+        # and the param is in the 'algs' column
         order = []
         for alg in kwargs['algs']:
             order += [str(p) for p in kwargs['alg_params'][alg][kwargs['compare_param']]]
+    else:
+        order = [kwargs['alg_names'][a] for a in kwargs['algs']]
+    print("horizontal: %s" % (kwargs.get('horizontal')))
+    print("orient: %s" % ('v' if not kwargs.get('horizontal') else 'h'))
 
     ax = sns.boxplot(data=df, ax=ax,
                      fliersize=1.5, order=order,
@@ -423,10 +632,27 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
 
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    # change the index to the terms
-    df.set_index(df.columns[0], inplace=True)
+    if kwargs['exp_type'] == "loso":
+        df['taxon-goid'] = df['#taxon'].map(str) + '-' + df['#goid']
+        index_col = 'taxon-goid'
+    else:
+        # change the index to the terms
+        index_col = df.columns[0]
+    df.set_index(index_col, inplace=True)
+    # check if algorithms are being compared, or experiments for a single algorithm
     algs = df['Algorithm'].unique()
-    df2 = df[[measure, 'Algorithm']]
+    plot_exp_names = df['plot_exp_name'].unique()
+    if len(algs) == 1 and len(plot_exp_names) > 1:
+        print("Comparing %d experiments: %s" % (len(plot_exp_names), ', '.join(plot_exp_names)))
+        compare_col = "plot_exp_name"
+        algs = plot_exp_names
+    elif len(algs) > 1:
+        print("Comparing %d algorithms: %s" % (len(algs), ', '.join(algs)))
+        compare_col = "Algorithm"
+    else:
+        print("ERROR: nothing to compare for scatterplot. %d algs (%s), %d experiments (%s)" % (len(algs), ', '.join(algs), len(plot_exp_names), ', '.join(plot_exp_names)))
+    df2 = df[[measure, compare_col]]
+    print(df2.head())
     if kwargs['term_stats'] is not None:
         df_stats = kwargs['term_stats'] 
         # change the index to the terms
@@ -435,17 +661,29 @@ def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
         df2['num_ann'] = df_stats['# positive examples']
 
         # now plot the # annotations on the x axis, and the fmax on the y axis
-        ax = sns.scatterplot('num_ann', measure, hue='Algorithm', data=df2, ax=ax,
+        ax = sns.scatterplot('num_ann', measure, hue=compare_col, data=df2, ax=ax,
                              linewidth=0,)
         ax.set_title(title)
     else:
-        df2 = df2.pivot(columns='Algorithm')
+        df2 = df2.pivot(columns=compare_col)
+        orig_num = str(len(df2.index))
+        df2.dropna(inplace=True)
+        new_num = str(len(df2.index))
         df2.columns = [' '.join(col).strip() for col in df2.columns.values]
         # if there are only two algorithms, make a joint plot
         if len(algs) == 2:
-            g = sns.jointplot(df2.columns[0], df2.columns[1], data=df2, xlim=(-0.02,1.02), ylim=(-0.02,1.02))
+            g = sns.jointplot(df2.columns[0], df2.columns[1], data=df2,
+                              xlim=(-0.02,1.02), ylim=(-0.02,1.02),
+                              marginal_kws=dict(bins=10))
             # also plot x=y
             g.ax_joint.plot((0,1),(0,1))
+            alg1, alg2 = df2.columns[0], df2.columns[1]
+            diff_col = "diff"
+            df2[diff_col] = df2[alg1] - df2[alg2]
+            # and print out some stats
+            print("%s > %s: %d (%0.3f)"% (alg1, alg2, len(df2[df2[diff_col] > 0]), len(df2[df2[diff_col] > 0]) / float(len(df2))))
+            print("%s < %s: %d (%0.3f)"% (alg1, alg2, len(df2[df2[diff_col] < 0]), len(df2[df2[diff_col] < 0]) / float(len(df2))))
+            print("%s = %s: %d (%0.3f)"% (alg1, alg2, len(df2[df2[diff_col] == 0]), len(df2[df2[diff_col] == 0]) / float(len(df2))))
         # if there are more, a pairplot
         else:
             g = sns.pairplot(data=df2)
@@ -458,6 +696,7 @@ def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
 
         # move the plots down a bit so the title isn't overalpping the subplots
         plt.subplots_adjust(top=0.9)
+        title = title.replace(orig_num, new_num)
         g.fig.suptitle(title)
 
     if out_pref is not None:
@@ -483,17 +722,21 @@ def compute_param_stat_sig(df, measure='fmax', **kwargs):
         #for param, df_param in df.groupby('Algorithm'):
         max_param_vals = df[df[param_col] == max_val][measure].dropna().values
         for p in params_list:
-            #if p == max_val:
-            #    continue
             param_vals = df[df[param_col] == p][measure].dropna().values
             if len(max_param_vals) != len(param_vals):
                 print("ERROR: # terms doesn't match exactly for %s vs %s:" % (max_val, p))
                 print(len(max_param_vals), len(param_vals))
                 sys.exit("quitting")
-            test_statistic, pval = mannwhitneyu(max_param_vals, param_vals, alternative='greater') 
-            out_str += "%s\t%s\t%s\t%0.3f\t%0.3e\t%0.3e\n" % (
-                params_alg[p], max_val, p, np.median(param_vals),
-                pval, np.median(max_param_vals - param_vals))
+            if p == max_val:
+                out_str += "%s\t%s\t%s\t%0.3f\t-\t-\n" % (
+                    params_alg[p], max_val, p, np.median(param_vals))
+            else:
+                # to be consistent, I'm going to use the wilcoxon rank-sum test here as well
+                #test_statistic, pval = mannwhitneyu(max_param_vals, param_vals, alternative='greater') 
+                test_statistic, pval = wilcoxon(max_param_vals, param_vals, alternative='greater') 
+                out_str += "%s\t%s\t%s\t%0.3f\t%0.3e\t%0.3e\n" % (
+                    params_alg[p], max_val, p, np.median(param_vals),
+                    pval, np.median(max_param_vals - param_vals))
                     #np.median(max_param_vals - param_vals) if len(max_param_vals) == len(param_vals) else -1)
 
         print("writing to %s" % (out_file))
@@ -531,27 +774,33 @@ def results_overview(df, measures=['fmax']):
     """
     Print an overview of the number of values / terms, as well as the median fmax
     """
-    print("net_version\texp_name\tmeasure\talg\tmedian\t# terms")
+    print("plot_exp_name\tmeasure\talg\tmedian\t# terms")
+    #print("net_version\texp_name\tmeasure\talg\tmedian\t# terms")
     #for plot_exp_name in sorted(df['plot_exp_name'].unique()):
     for plot_exp_name in df['plot_exp_name'].unique():
         df_curr = df[df['plot_exp_name'] == plot_exp_name]
-        net_version, exp_name = df_curr['net_version'].unique()[0], df_curr['exp_name'].unique()[0]
+        #net_version, exp_name = df_curr['net_version'].unique()[0], df_curr['exp_name'].unique()[0]
+        #if len(plot_exp_name) > len(net_version + exp_name):
         # limit the goterms to those that are also present for SinkSource(?)
         for measure in measures:
             for alg in sorted(df_curr['Algorithm'].unique()):
                 df_alg = df_curr[df_curr['Algorithm'] == alg][measure]
-                #print("%s\t%s\t%s\t%0.3f\t%d" % (plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
-                print("%s\t%s\t%s\t%s\t%0.3f\t%d" % (net_version, exp_name, measure, alg, df_alg.median(), len(df_alg)))
+                print("%s\t%s\t%s\t%0.3f\t%d" % (plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
+                #print("%s\t%s\t%s\t%s\t%0.3f\t%d" % (net_version, exp_name, measure, alg, df_alg.median(), len(df_alg)))
 
 
+print_warning = True
 def get_algs_to_run(alg_settings, **kwargs):
+    global print_warning
     # if there aren't any algs specified by the command line (i.e., kwargs),
     # then use whatever is in the config file
     if kwargs['algs'] is None:
         algs_to_run = run_eval_algs.get_algs_to_run(alg_settings)
         kwargs['algs'] = [a.lower() for a in algs_to_run]
-        print("\nNo algs were specified. Using the algorithms in the yaml file:")
-        print(str(kwargs['algs']))
+        if print_warning:
+            print("\nNo algs were specified. Using the algorithms in the yaml file:")
+            print(str(kwargs['algs']))
+            print_warning = False 
         if len(algs_to_run) == 0:
             print("ERROR: Must specify algs with --alg or by setting 'should_run' to [True] in the config file")
             sys.exit("Quitting")
@@ -568,7 +817,14 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
     df_all = pd.DataFrame()
     algs = get_algs_to_run(alg_settings, **kwargs)
     for dataset in input_settings['datasets']:
+        if kwargs.get('most_specific_terms'):
+            # load the ontology
+            obo_file = "%s/%s" % (input_settings['input_dir'], dataset['obo_file'])
+            go_dags = go_examples.parse_obo_file_and_build_dags(obo_file)
         for alg in algs:
+            if alg not in alg_settings:
+                print("%s not found in config file. Skipping" % (alg))
+                continue
             alg_params = alg_settings[alg]
             curr_seed = kwargs.get('cv_seed')
             if 'cv-' in kwargs['exp_type']:
@@ -591,9 +847,50 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
                     results_dir=output_settings['output_dir'], **kwargs,  #exp_type=kwargs['exp_type'],
                     #only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
                 )
+                if kwargs.get('most_specific_terms') and len(df) > 0:
+                    df = get_most_specific_sp_term_pairs(
+                            df, go_dags, **kwargs)
+                    print("MAD: %s" % (mad(df['fmax'].values)))
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
     return df_all
+
+
+def get_most_specific_sp_term_pairs(df, go_dags, **kwargs):
+    # figure out which DAG this is
+    for h, dag in go_dags.items():
+        t = df['#goid'].values[0]
+        if dag.has_node(t):
+            break
+    print("\tusing %s hierarchy" % (h))
+
+    new_df = pd.DataFrame()
+    # for each species, limit to the terms which have no descendants
+    for taxon, df_t in df.groupby('#taxon'):
+        terms = get_most_specific_terms(df_t['#goid'].values, dag)
+        df_t = df_t[df_t['#goid'].isin(terms)]
+        new_df = pd.concat([new_df, df_t])
+    print("\t%d sp-term pairs limited to %d most specific sp-term pairs" % (
+        (df['#taxon'].astype(str) + df['#goid']).nunique(), (new_df['#taxon'].astype(str) + new_df['#goid']).nunique()))
+    #print(new_df['#taxon'].nunique())
+    #print(new_df.head())
+    #sys.exit()
+
+    return new_df
+
+
+# given the set of annotations for a protein and the GO or HPO DAG as a networkx graph, keep only the most specific terms
+def get_most_specific_terms(terms, dag):
+    ancestor_terms = set()
+    for t in set(terms):
+        if t in ancestor_terms:
+            continue
+        # get the ancestors, which are technically descendants in the DAG
+        ancestors = set(nx.descendants(dag, t))
+        ancestor_terms |= ancestors
+    # remove the ancestors to get the specific terms
+    specific_terms = set(terms) - ancestor_terms
+    return specific_terms
 
 
 def add_dataset_settings(dataset, df):
@@ -645,6 +942,8 @@ def load_alg_results(
             continue
         print("\treading %s" % (cv_file))
         df = pd.read_csv(cv_file, sep='\t')
+        # remove any duplicate rows
+        df.drop_duplicates(inplace=True)
         # hack to get the script to plot just the parameter value
         if kwargs.get('compare_param') is not None:
             df['Algorithm'] = str(param_combo[kwargs['compare_param']])
@@ -655,6 +954,12 @@ def load_alg_results(
             df['Algorithm'] = alg_name + params_str
         df_all = pd.concat([df_all, df])
     return df_all
+
+
+def mad(vals):
+    med = np.median(vals)
+    mad = np.median([abs(val - med) for val in vals])
+    return mad
 
 
 if __name__ == "__main__":
