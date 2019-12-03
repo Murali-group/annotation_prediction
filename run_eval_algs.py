@@ -97,7 +97,7 @@ def setup_opts():
     # TODO finish adding this option
     #group.add_argument('-T', '--ground-truth-file', type=str,
     #                 help="File containing true annotations with which to evaluate predictions")
-    group.add_argument('--postfix', type=str, default='',
+    group.add_argument('--postfix', type=str, 
             help="String to add to the end of the output file name(s)")
     group.add_argument('--forcealg', action="store_true", default=False,
             help="Force re-running algorithms if the output files already exist")
@@ -114,8 +114,15 @@ def run(config_map, **kwargs):
     input_dir = input_settings['input_dir']
     alg_settings = config_map['algs']
     output_settings = config_map['output_settings']
+    postfix = kwargs.get("postfix")
     # combine the evaluation settings in the config file and the kwargs
     kwargs.update(config_map['eval_settings'])
+    # if specified, use this postfix, meaning overwrite the postfix from the yaml file
+    if postfix is not None:
+        kwargs['postfix'] = postfix
+    # otherwise use the default empty string
+    elif kwargs.get('postfix') is None:
+        kwargs['postfix'] = ""
 
     for dataset in input_settings['datasets']:
         # add options specified for this dataset to kwargs  
@@ -179,9 +186,16 @@ def setup_net(input_dir, dataset, **kwargs):
     if 'net_files' in dataset:
         net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], net_file) for net_file in dataset['net_files']]
     unweighted = dataset['net_settings'].get('unweighted', False) if 'net_settings' in dataset else False
-    if dataset.get('multi_net',False) is True: 
+    # if multiple networks are passed in, then set multi_net to True automatically
+    if (net_files is not None and len(net_files) > 1) or 'string_net_files' in dataset:
+        if dataset.get('multi_net') is False:
+            print("WARNING: multiple networks were passed in. Setting 'multi_net' to True")
+        dataset['multi_net'] = True
+
+    # parse and store the networks 
+    if dataset.get('multi_net') is True: 
         # if multiple file names are passed in, then map each one of them
-        if isinstance(net_files, list) or 'string_net_files' in dataset:
+        if net_files is not None or 'string_net_files' in dataset:
             string_net_files = ["%s/%s/%s" % (input_dir, dataset['net_version'], string_net_file) for string_net_file in dataset['string_net_files']]
             string_nets = None 
             if 'string_nets' in dataset['net_settings']:
@@ -271,6 +285,7 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
                 obo_file, pos_neg_file_eval, sparse_ann_file, prots, **kwargs)
         # also limit the terms in the eval_ann_obj to those from the pos_neg_file
         eval_ann_obj.limit_to_terms(selected_terms)
+    ann_obj.selected_terms = selected_terms
     return selected_terms, ann_obj, eval_ann_obj
 
 
@@ -325,14 +340,17 @@ def run_algs(alg_runners, **kwargs):
     """
     # first check to see if the algorithms have already been run
     # and if the results should be overwritten
+    for run_obj in alg_runners:
+        out_file = "%s/pred-scores%s.txt" % (run_obj.out_dir, run_obj.params_str)
+        run_obj.out_file = out_file
+        run_obj.out_pref = out_file.replace(".txt","")
     if kwargs['forcealg'] is True or kwargs['num_pred_to_write'] == 0:
         runners_to_run = alg_runners
     else:
         runners_to_run = []
         for run_obj in alg_runners:
-            out_file = "%s/pred%s.txt" % (run_obj.out_dir, run_obj.params_str)
-            if os.path.isfile(out_file):
-                print("%s already exists. Use --forcealg to overwite" % (out_file))
+            if os.path.isfile(run_obj.out_file):
+                print("%s already exists. Use --forcealg to overwite" % (run_obj.out_file))
             else:
                 runners_to_run.append(run_obj)
 
@@ -365,13 +383,13 @@ def run_algs(alg_runners, **kwargs):
                 positives = (y > 0).nonzero()[1]
                 num_pred_to_write[run_obj.goids[i]] = len(positives) * kwargs['factor_pred_to_write']
         if num_pred_to_write != 0:
-            out_file = "%s/pred%s.txt" % (run_obj.out_dir, run_obj.params_str)
             # TODO generate the output file paths in the runner object
             #out_file = run_obj.out_file
-            utils.checkDir(os.path.dirname(out_file)) 
+            utils.checkDir(os.path.dirname(run_obj.out_file)) 
             write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
-                         out_file, num_pred_to_write=num_pred_to_write)
+                         run_obj.out_file, num_pred_to_write=num_pred_to_write)
 
+    eval_loso.write_stats_file(runners_to_run, params_results)
     print(params_results)
     print("Finished")
 
