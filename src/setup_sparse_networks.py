@@ -22,6 +22,11 @@ from scipy.io import savemat, loadmat
 from scipy import sparse as sp
 from tqdm import tqdm
 import gzip
+# this warning prints out a lot when normalizing the networks due to nodes having no edges.
+# RuntimeWarning: divide by zero encountered in true_divide
+# Ignore it for now
+import warnings
+warnings.simplefilter('ignore', RuntimeWarning)
 
 
 class Sparse_Networks:
@@ -103,6 +108,8 @@ class Sparse_Networks:
         """ Combine the different networks using the specified weights
         *weights*: list of weights, one for each network
         """
+        assert len(weights) == len(self.normalized_nets), \
+            "%d weights supplied not enough for %d nets" % (len(weights), len(self.normalized_nets))
         combined_network = weights[0]*self.normalized_nets[0]
         for i, w in enumerate(weights):
             combined_network += w*self.normalized_nets[i] 
@@ -180,7 +187,7 @@ class Sparse_Annotations:
         self.prots = new_prots
 
     def limit_to_terms(self, terms_list):
-        """ *terms_list*: list of terms. Data from rows not in this list of terms will be empty
+        """ *terms_list*: list of terms. Data from rows not in this list of terms will be removed
         """
         terms_idx = [self.goid2idx[t] for t in terms_list if t in self.goid2idx]
         print("\tlimiting data in annotation matrix from %d terms to %d" % (len(self.goids), len(terms_idx)))
@@ -191,6 +198,30 @@ class Sparse_Annotations:
         self.ann_matrix = diag.dot(self.ann_matrix)
         print("\t%d pos annotations reduced to %d" % (
             num_pos, len((self.ann_matrix > 0).astype(int).data)))
+
+    def reshape_to_terms(self, terms_list, dag_mat):
+        """ 
+        *terms_list*: ordered list of terms to which the rows should be changed (e.g., COMP aligned with EXPC)
+        *dag_mat*: new dag matrix. Required since the terms list could contain terms which are not in this DAG
+        """
+        assert len(terms_list) == dag_mat.shape[0], \
+            "ERROR: # terms given to reshape != the shape of the given dag matrix"
+        if len(terms_list) < len(self.goids):
+            # remove the extra data first to speed up indexing
+            self.limit_to_terms(terms_list)
+        # now move each row to the correct position in the new matrix
+        new_ann_mat = sp.lil_matrix((len(terms_list), len(self.prots)))
+        #terms_idx = [self.goid2idx[t] for t in terms_list if t in self.goid2idx]
+        for idx, term in enumerate(terms_list):
+            idx2 = self.goid2idx.get(term)
+            if idx2 is None:
+                continue
+            new_ann_mat[idx] = self.ann_matrix[idx2]
+            #new_dag_mat[idx] = self.dag_matrix[idx2][:,terms_idx]
+        self.ann_matrix = new_ann_mat.tocsr()
+        self.dag_matrix = dag_mat.tocsr()
+        self.goids = terms_list
+        self.goid2idx = {g: i for i, g in enumerate(self.goids)}
 
     def limit_to_prots(self, prots):
         """ *prots*: array with 1s at selected prots, 0s at other indices
