@@ -15,14 +15,31 @@ def setupInputs(run_obj):
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
     run_obj.hierarchy_mat = run_obj.ann_obj.dag_matrix
     run_obj.goids = run_obj.ann_obj.goids
+    goid2idx = run_obj.ann_obj.goid2idx
+    terms_to_run_idx = [goid2idx[g] for g in run_obj.goids_to_run]
 
     # setup the matrices
     if run_obj.kwargs.get('verbose'):
         print("Setting up the Birg/AptRank annotation matrix")
     # get only the positive examples from the ann_matrix
     run_obj.pos_mat = (run_obj.ann_matrix > 0).astype(int)
-    # make sure the annotations are propagated up the DAG
-    run_obj.pos_mat = setup.propagate_ann_up_dag(run_obj.pos_mat, run_obj.hierarchy_mat)
+    if run_obj.params.get('propagate_before_run') is True:
+        if run_obj.kwargs.get('verbose'):
+            print("\tpropagating annotations up the DAG before running")
+        # make sure the annotations are propagated up the DAG
+        run_obj.pos_mat = setup.propagate_ann_up_dag(run_obj.pos_mat, run_obj.hierarchy_mat)
+    else:
+        # limit the terms to consider to only those for which we want scores 
+        # (i.e., most specific or leaf terms)
+        if run_obj.kwargs.get('verbose'):
+            print("\tlimiting annotations to %d terms" % (len(terms_to_run_idx)))
+        limit_to_terms = np.zeros(len(run_obj.goids))
+        limit_to_terms[terms_to_run_idx] = 1
+        num_pos = len(run_obj.pos_mat.data)
+        # select the given rows by multiplying by an identity matrix with 1s at the indices of specified terms
+        run_obj.pos_mat = sp.diags(limit_to_terms).dot(run_obj.pos_mat)
+        if run_obj.kwargs.get('verbose'):
+            print("\t%s pos ann limited to %s" % (num_pos, len(run_obj.pos_mat.data)))
     # make sure there's no 0s leftover
     run_obj.pos_mat.eliminate_zeros()
     assert (run_obj.pos_mat.shape[0] == run_obj.hierarchy_mat.shape[0]), \
@@ -47,9 +64,9 @@ def setupInputs(run_obj):
     run_obj.nodes_to_run = set(list(range(run_obj.P.shape[0])))
     # if a subset of nodes is specified, then run birgrank on only those nodes.
     # does not apply for aptrank
-    if run_obj.kwargs.get('nodes_to_run') is not None:
+    if 'nodes_to_run' in run_obj.kwargs:
         run_obj.nodes_to_run = run_obj.kwargs['nodes_to_run']
-        print("\trunning on only the %d nodes with a pos/neg annotation" % (len(run_obj.nodes_to_run)))
+        print("\tcomputing scores for %d nodes" % (len(run_obj.nodes_to_run)))
 
     return
 
@@ -63,6 +80,7 @@ def setup_params_str(weight_str, params, name):
     if weight_str == "gmw":
         weight_str = "swsn"
     params_str = "%s" % (weight_str)
+    params_str += "-prop" if params.get('propagate_before_run') else "-noprop"
     if name == 'birgrank':
         alpha, theta, mu, br_lambda = params['alpha'], params['theta'], params['mu'], params['lambda'] 
         params_str += '-a%s-t%s-m%s-l%s-eps%s-maxi%s' % (
@@ -100,12 +118,10 @@ def run(run_obj):
     if alg == 'birgrank':
         theta, mu = params['theta'], params['mu']
         alpha, eps, max_iters = params['alpha'], float(params['eps']), params['max_iters']
-        start_time = time.process_time()
-        Xh = birgrank.birgRank(
+        Xh, process_time = birgrank.birgRank(
                 P, pos_mat.transpose(), dH,
                 alpha=alpha, theta=theta, mu=mu, eps=eps, max_iters=max_iters,
                 nodes=run_obj.nodes_to_run, verbose=run_obj.kwargs.get('verbose', False))
-        process_time = time.process_time() - start_time
     elif alg == 'aptrank':
         k, s, t, diff_type = params['k'], params['s'], params['t'] , params['diff_type'] 
         # make sure aptrank is imported
@@ -123,7 +139,8 @@ def run(run_obj):
 
     # also keep track of the time it takes for each of the parameter sets
     #params_results["%s_wall_time"%alg] += wall_time
-    params_results["%s_process_time"%alg] += process_time
+    alg_name = "%s%s" % (alg, run_obj.params_str)
+    params_results["%s_process_time"%alg_name] += process_time
 
     # limit the scores matrix to only the GOIDs for which we want the scores
     if len(run_obj.goids_to_run) < goid_scores.shape[0]:

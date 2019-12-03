@@ -2,7 +2,9 @@
 #import numpy as np
 import src.algorithms.alg_utils as alg_utils
 from scipy.sparse import csc_matrix, lil_matrix, vstack, hstack, eye
+from scipy import sparse as sp
 from scipy.sparse.linalg import spsolve
+import numpy as np
 import time
 #import sys
 from tqdm import tqdm, trange
@@ -33,10 +35,22 @@ def birgRank(G, Rtrain, dH, alpha=.5, theta=.5, mu=.5,
     """
 
     print("Starting birgRank")
+    # m: # nodes, n: # terms
     m, n = Rtrain.shape
 
     # make seeding vectors (matrix)
-    B = vstack([theta*eye(m), (1-theta)*Rtrain.T]).tocsc()
+    # update: specify in B the restart nodes  
+    #B = vstack([theta*eye(m), (1-theta)*Rtrain.T]).tocsc()
+    if nodes is None:
+        nodes = np.arange(m)
+    restart_vec = np.zeros(m)
+    restart_vec[nodes] = 1 
+    restart_nodes_diag = sp.diags(restart_vec)
+    # limit Rtrain to the nodes for which we want scores
+    restart_ann_mat = Rtrain.T.dot(restart_nodes_diag)
+    B = vstack([theta*restart_nodes_diag, 
+                (1-theta)*restart_ann_mat]).tocsc()
+
     # column normalize the matrix
     B = alg_utils.normalizeGraphEdgeWeights(B, axis=0)
     B = (1-alpha)*B
@@ -53,26 +67,26 @@ def birgRank(G, Rtrain, dH, alpha=.5, theta=.5, mu=.5,
     P = alg_utils.normalizeGraphEdgeWeights(P, axis=0)  # column normalization
     P = alpha*P
     # make sure they're in csc format for the solvers
-    P = P.tocsc()
-    B = B.tocsc()
+    # update: try csr for matrix multiplication since there's more rows than columns
+    P = P.tocsr()
+    B = B.tocsr()
 
     start_time = time.process_time()
     if eps != 0 or max_iters != 0:
-        print("\tstarting power iteration over each node individually")
+        #print("\tstarting power iteration over each node individually")
         # Version of birgrank using a power iteration. Useful as scipy's solver struggles with these large matrices
         # looks like the real problem is the amount of ram needed to store the results in the large matrix X
         # rather than power iterate with the entire matrix B, run power iteration for column of B individually
-        # and then merge only the Xh results
+        # and then merge only the Xh results.
+        # much faster to only compute scores for a subset of nodes.
+        # also uses less RAM because the RWR scores aren't kept
         Xh = lil_matrix((m,n))
-        # much faster to only compute scores for a subset of nodes
-        if nodes is None:
-            nodes = list(range(B.shape[1]))
         for i in tqdm(nodes):
             e = B[:,i].toarray().flatten()
             x = e.copy()
             prev_x = x.copy()
             for iters in range(1,max_iters+1):
-                x = csc_matrix.dot(P, prev_x) + e
+                x = P.dot(prev_x) + e
 
                 max_d = (x - prev_x).max()
                 #if verbose:
@@ -84,10 +98,25 @@ def birgRank(G, Rtrain, dH, alpha=.5, theta=.5, mu=.5,
             if verbose:
                 print("\tbirgRank converged after %d iterations. max_d: %0.2e, eps: %0.2e" % (iters, max_d, eps))
         Xh = Xh.T
+        # UPDATE: run power iteration for all nodes 
+        """
+        X = csc_matrix(B.shape)
+        prev_X = csc_matrix(B.shape)
+        for iters in trange(1,max_iters+1):
+            X = P.dot(prev_X) + B
+            max_d = (X - prev_X).max()
+            if verbose:
+                tqdm.write("\t\t%d iters: max score change: %0.6f" % (iters, max_d))
+            if max_d < eps:
+                break
+            prev_X = X
+        # now extract the term rows which correspond to the gene-term scores
+        Xh = X[m:,:]
+        """
 
         total_time = time.process_time() - start_time
         # this only shows the # of iterations for the last prot
-        print("\tbirgRank converged after %d iterations (%0.2f sec) for node %d" % (iters, total_time, i))
+        print("\tbirgRank converged after %d iterations (%0.2f sec)" % (iters, total_time))
     else:
         A = eye(m+n) - P
         A = A.tocsc()
@@ -106,4 +135,4 @@ def birgRank(G, Rtrain, dH, alpha=.5, theta=.5, mu=.5,
 
     # transpose Xh so it has the same dimensions as Rtrain
     # prot rows, goid columns
-    return Xh.T
+    return Xh.T, total_time
