@@ -28,7 +28,7 @@ def evaluate_ground_truth(
     # only evaluate the terms that are in both the goid_scores matrix and the eval matrix
     goids_to_eval = set(goids) & set(eval_ann_obj.goids)
     if len(goids_to_eval) != len(goids) or len(goids_to_eval) != len(eval_ann_obj.goids):
-        print("\nWARNING: only %d goids both have scores (/%d goids) and are in the eval matrix (/%d goids)" % (
+        print("\nINFO: only %d goids both have scores (/%d goids) and are in the eval matrix (/%d goids)" % (
             len(goids_to_eval), len(goids), len(eval_ann_obj.goids)))
 
     print("Computing fmax from ground truth for %d goterms" % (len(goids_to_eval)))
@@ -64,7 +64,9 @@ def evaluate_ground_truth(
         prec, recall, fpr, pos_neg_stats = compute_eval_measures(
                 scores, positives, negatives=negatives, 
                 track_pos=True, track_neg=True)
-        if write_prec_rec or early_prec is not None:
+        # Takes too much RAM to store these values for all terms 
+        # so only store them when they will be written to a file
+        if write_prec_rec:
             goid_prec_rec[goid] = (prec, recall, pos_neg_stats)
         fmax = compute_fmax(prec, recall)
         avgp = compute_avgp(prec, recall)
@@ -74,53 +76,29 @@ def evaluate_ground_truth(
         else:
             auprc = compute_auprc(prec, recall)
             auroc = compute_auroc([r for r, f in fpr], [f for r, f in fpr])
-        goid_stats[goid] = (fmax, avgp, auprc, auroc)
+        eprec_vals = []
+        if early_prec is not None:
+            # compute the early precision at specified values
+            eprec_vals = compute_early_prec(
+                prec, recall, pos_neg_stats, early_prec, goid_num_pos[goid])
+        goid_stats[goid] = (fmax, avgp, auprc, auroc, eprec_vals)
         if kwargs['verbose']:
             print("%s fmax: %0.4f" % (goid, fmax))
 
-    # compute the early precision at specified values
-    early_prec_header = "" 
-    early_prec_str = defaultdict(str) 
-    if early_prec is not None:
-        # figure out how many columns to write for early precision
-        early_prec_header = ["eprec-rec%s" % (r) for r in early_prec]
-        # for each GO term, format the output columns now.
-        for g, (prec, rec, pos_neg_stats) in goid_prec_rec.items():
-            early_prec_values = []
-            for curr_recall in early_prec:
-                # if a k recall is specified, get the precision at the recall which is k * # ann in the left-out species
-                if 'k' in curr_recall:
-                    k_val = float(curr_recall.replace('k',''))
-                    num_nodes_to_get = k_val * goid_num_pos[g] 
-                    # the pos_neg_stats tracks the prec for every node.
-                    # So find the precision value for first node with an index >= (k * # ann)
-                    for idx, (_, _, _, _, curr_num_pos) in enumerate(pos_neg_stats): 
-                        if curr_num_pos >= num_nodes_to_get:
-                            break
-                    # get the precision at the corresponding index
-                    p = prec[idx]
-                    early_prec_values.append(p)
-                else:
-                    curr_recall = float(curr_recall)
-                    # find the first precision value where the recall is >= the specified recall
-                    for p, r in zip(prec, rec):
-                        if r >= curr_recall:
-                            early_prec_values.append(p)
-                            break
-            # now format the values so they'll be ready to be written to the output file
-            early_prec_str[g] = '\t'+'\t'.join("%0.4f" % (p) for p in early_prec_values)
-
-    # skip writing the CV file if there's only one term specified
+    # skip writing the output file if there's only one term specified
     if write_prec_rec and len(goid_prec_rec) == 1:
         print("skipping writing %s" % (out_file))
     else:
         out_str = ""
         # sort by # ann per term
         for g in sorted(goid_stats, key=goid_num_pos.get, reverse=True):
-            fmax, avgp, auprc, auroc = goid_stats[g]
+            fmax, avgp, auprc, auroc, eprec_vals = goid_stats[g]
+            # format the values so they'll be ready to be written to the output file
+            early_prec_str = '\t'+'\t'.join("%0.4f" % (p) for p in eprec_vals) \
+                             if len(eprec_vals) > 0 else ""
             out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
                 "%s\t"%taxon if taxon not in ["-", None] else "",
-                g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str[g])
+                g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str)
         # don't re-write the header if this file is being appended to
         if not os.path.isfile(out_file) or not append:
             print("Writing results to %s\n" % (out_file))
@@ -129,7 +107,8 @@ def evaluate_ground_truth(
                 header_line = "#taxon\t%s\t# test ann" % (header_line)
             else:
                 header_line += "\t# ann"
-            header_line += '\t' + '\t'.join(early_prec_header)
+            if early_prec is not None:
+                header_line += '\t'+'\t'.join(["eprec-rec%s" % (r) for r in early_prec])
             out_str = header_line+"\n" + out_str
         else:
             print("Appending results to %s\n" % (out_file))
@@ -262,3 +241,28 @@ def compute_auprc(prec, rec):
 def compute_auroc(tpr, fpr):
     auroc = metrics.auc(fpr, tpr)
     return auroc
+
+
+def compute_early_prec(prec, rec, pos_neg_stats, recall_vals, num_pos):
+    early_prec_values = []
+    for curr_recall in recall_vals:
+        # if a k recall is specified, get the precision at the recall which is k * # ann in the left-out species
+        if 'k' in curr_recall:
+            k_val = float(curr_recall.replace('k',''))
+            num_nodes_to_get = k_val * num_pos 
+            # the pos_neg_stats tracks the prec for every node.
+            # So find the precision value for first node with an index >= (k * # ann)
+            for idx, (_, _, _, _, curr_num_pos) in enumerate(pos_neg_stats): 
+                if curr_num_pos >= num_nodes_to_get:
+                    break
+            # get the precision at the corresponding index
+            p = prec[idx]
+            early_prec_values.append(p)
+        else:
+            curr_recall = float(curr_recall)
+            # find the first precision value where the recall is >= the specified recall
+            for p, r in zip(prec, rec):
+                if r >= curr_recall:
+                    early_prec_values.append(p)
+                    break
+    return early_prec_values
