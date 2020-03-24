@@ -266,7 +266,7 @@ def create_sparse_net_file(
     string_nets = list(string_nets)
     num_networks = len(net_files) + len(string_nets)
     # if there is only 1 string network, then write the name instead of the number
-    if num_networks == 1 and len(string_nets) == 1:
+    if len(string_nets) == 1:
         num_networks = list(string_nets)[0] 
     sparse_nets_file = "%s%s-sparse-nets.mat" % (out_pref, num_networks)
     # the node IDs should be the same for each of the networks,
