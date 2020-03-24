@@ -22,44 +22,44 @@ def evaluate_ground_truth(
     *write_prec_rec*: For every term, write a file containing the 
         precision and recall at every positive and negative example
     """
-    goid_scores, goids = run_obj.goid_scores, run_obj.goids_to_run 
+    term_scores, terms = run_obj.term_scores, run_obj.terms_to_run 
     eval_ann_matrix, prots = eval_ann_obj.ann_matrix, eval_ann_obj.prots
-    score_goid2idx = run_obj.ann_obj.goid2idx
-    # only evaluate the terms that are in both the goid_scores matrix and the eval matrix
-    goids_to_eval = set(goids) & set(eval_ann_obj.goids)
-    if len(goids_to_eval) != len(goids) or len(goids_to_eval) != len(eval_ann_obj.goids):
-        print("\nINFO: only %d goids both have scores (/%d goids) and are in the eval matrix (/%d goids)" % (
-            len(goids_to_eval), len(goids), len(eval_ann_obj.goids)))
+    score_term2idx = run_obj.ann_obj.term2idx
+    # only evaluate the terms that are in both the term_scores matrix and the eval matrix
+    terms_to_eval = set(terms) & set(eval_ann_obj.terms)
+    if len(terms_to_eval) != len(terms) or len(terms_to_eval) != len(eval_ann_obj.terms):
+        print("\nINFO: only %d terms both have scores (/%d terms) and are in the eval matrix (/%d terms)" % (
+            len(terms_to_eval), len(terms), len(eval_ann_obj.terms)))
 
-    print("Computing fmax from ground truth for %d goterms" % (len(goids_to_eval)))
-    goid_stats = {}
-    goid_num_pos = {} 
-    goid_prec_rec = {}
+    print("Computing fmax from ground truth for %d terms" % (len(terms_to_eval)))
+    term_stats = {}
+    term_num_pos = {} 
+    term_prec_rec = {}
 
-    for goid in goids_to_eval:
-        eval_idx = eval_ann_obj.goid2idx[goid]
-        # get the row corresponding to the current goids annotations 
-        goid_ann = eval_ann_matrix[eval_idx,:].toarray().flatten()
-        positives = np.where(goid_ann > 0)[0]
-        # to get the scores, map the current goid index to the
-        # index of the goid in the scores matrix
-        scores = goid_scores[score_goid2idx[goid]]
+    for term in terms_to_eval:
+        eval_idx = eval_ann_obj.term2idx[term]
+        # get the row corresponding to the current terms annotations 
+        term_ann = eval_ann_matrix[eval_idx,:].toarray().flatten()
+        positives = np.where(term_ann > 0)[0]
+        # to get the scores, map the current term index to the
+        # index of the term in the scores matrix
+        scores = term_scores[score_term2idx[term]]
         # this is only needed for aptrank since it does not return a sparse matrix
         if sparse.issparse(scores):
             scores = scores.toarray().flatten()
-        goid_num_pos[goid] = len(positives)
+        term_num_pos[term] = len(positives)
         if len(positives) == 0:
             if kwargs['verbose']:
-                print("%s has 0 positives after restricting to nodes in the network. Skipping" % (goid))
+                print("%s has 0 positives after restricting to nodes in the network. Skipping" % (term))
             continue
         if non_pos_as_neg_eval is True:
             # leave everything not a positive as a negative
             negatives = None
         else:
             # alternatively, use the negatives from that species as the set of negatives
-            negatives = np.where(goid_ann < 0)[0]
+            negatives = np.where(term_ann < 0)[0]
             if len(negatives) == 0:
-                print("WARNING: 0 negatives for %s - %s. Skipping" % (goid, taxon))
+                print("WARNING: 0 negatives for %s - %s. Skipping" % (term, taxon))
                 continue
         prec, recall, fpr, pos_neg_stats = compute_eval_measures(
                 scores, positives, negatives=negatives, 
@@ -67,7 +67,7 @@ def evaluate_ground_truth(
         # Takes too much RAM to store these values for all terms 
         # so only store them when they will be written to a file
         if write_prec_rec:
-            goid_prec_rec[goid] = (prec, recall, pos_neg_stats)
+            term_prec_rec[term] = (prec, recall, pos_neg_stats)
         fmax = compute_fmax(prec, recall)
         avgp = compute_avgp(prec, recall)
         if len(prec) == 1:
@@ -80,29 +80,29 @@ def evaluate_ground_truth(
         if early_prec is not None:
             # compute the early precision at specified values
             eprec_vals = compute_early_prec(
-                prec, recall, pos_neg_stats, early_prec, goid_num_pos[goid])
-        goid_stats[goid] = (fmax, avgp, auprc, auroc, eprec_vals)
+                prec, recall, pos_neg_stats, early_prec, term_num_pos[term])
+        term_stats[term] = (fmax, avgp, auprc, auroc, eprec_vals)
         if kwargs['verbose']:
-            print("%s fmax: %0.4f" % (goid, fmax))
+            print("%s fmax: %0.4f" % (term, fmax))
 
     # skip writing the output file if there's only one term specified
-    if write_prec_rec and len(goid_prec_rec) == 1:
+    if write_prec_rec and len(term_prec_rec) == 1:
         print("skipping writing %s" % (out_file))
     else:
         out_str = ""
         # sort by # ann per term
-        for g in sorted(goid_stats, key=goid_num_pos.get, reverse=True):
-            fmax, avgp, auprc, auroc, eprec_vals = goid_stats[g]
+        for g in sorted(term_stats, key=term_num_pos.get, reverse=True):
+            fmax, avgp, auprc, auroc, eprec_vals = term_stats[g]
             # format the values so they'll be ready to be written to the output file
             early_prec_str = '\t'+'\t'.join("%0.4f" % (p) for p in eprec_vals) \
                              if len(eprec_vals) > 0 else ""
             out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
                 "%s\t"%taxon if taxon not in ["-", None] else "",
-                g, fmax, avgp, auprc, auroc, goid_num_pos[g], early_prec_str)
+                g, fmax, avgp, auprc, auroc, term_num_pos[g], early_prec_str)
         # don't re-write the header if this file is being appended to
         if not os.path.isfile(out_file) or not append:
             print("Writing results to %s\n" % (out_file))
-            header_line = "#goid\tfmax\tavgp\tauprc\tauroc"
+            header_line = "#term\tfmax\tavgp\tauprc\tauroc"
             if taxon not in ['-', None]:
                 header_line = "#taxon\t%s\t# test ann" % (header_line)
             else:
@@ -119,17 +119,17 @@ def evaluate_ground_truth(
             fcntl.flock(out, fcntl.LOCK_UN)
 
     if write_prec_rec:
-        goid = list(goid_prec_rec.keys())[0]
+        term = list(term_prec_rec.keys())[0]
         out_file_pr = out_file.replace('.txt', "prec-rec%s%s.txt" % (
             taxon if taxon not in ['-', None] else '',
-            '-%s'%(goid) if len(goid_prec_rec) == 1 else ""))
+            '-%s'%(term) if len(term_prec_rec) == 1 else ""))
         print("writing prec/rec to %s" % (out_file_pr))
         with open(out_file_pr, 'w') as out:
-            out.write("#goid\tprec\trec\tnode\tscore\tidx\tpos/neg\n")
-            #for goid, (prec, rec, pos_neg_stats) in sorted(goid_prec_rec.items(), key=goid_num_pos.get, reverse=True):
-            for goid, (prec, rec, pos_neg_stats) in goid_prec_rec.items():
+            out.write("#term\tprec\trec\tnode\tscore\tidx\tpos/neg\n")
+            #for term, (prec, rec, pos_neg_stats) in sorted(term_prec_rec.items(), key=term_num_pos.get, reverse=True):
+            for term, (prec, rec, pos_neg_stats) in term_prec_rec.items():
                 out.write(''.join(["%s\t%0.4f\t%0.4f\t%s\t%0.4e\t%d\t%d\n" % (
-                    goid, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
+                    term, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
 
 
 def compute_eval_measures(scores, positives, negatives=None, 

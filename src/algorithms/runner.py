@@ -6,10 +6,7 @@ import src.algorithms.alg_utils
 import src.algorithms.fastsinksource_runner as fastsinksource
 import src.algorithms.sinksource_bounds_runner as ss_bounds
 import src.algorithms.genemania_runner as genemania
-import src.algorithms.apt_birg_rank_runner as birgrank
 #import src.algorithms.sinksource_bounds
-#from src.algorithms.aptrank_birgrank.birgrank import birgRank
-#import src.algorithms.aptrank_birgrank.run_birgrank as run_birgrank
 import numpy as np
 from scipy import sparse as sp
 
@@ -25,21 +22,7 @@ LibMapper = {
     'localplus': fastsinksource,
     'genemania': genemania,
     'genemaniaplus': genemania,
-    'aptrank': birgrank,
-    'birgrank': birgrank,
 }
-
-
-#AlgorithmMapper = {
-#    'fastsinksource': fastsinksource.run,
-#    'genemania': genemania.run,
-#}
-
-
-#OutputParser = {
-#    'fastsinksource': fastsinksource.setupOutputs,
-#    'genemania': genemania.setupOutputs,
-#}
 
 
 class Runner(object):
@@ -59,8 +42,8 @@ class Runner(object):
         self.kwargs = kwargs
         self.verbose = kwargs.get('verbose', False) 
         self.forced = kwargs.get('forcealg', False) 
-        # for term-based algorithms, can limit the goids for which they will be run
-        self.goids_to_run = kwargs.get('goids_to_run', ann_obj.goids)
+        # for term-based algorithms, can limit the terms for which they will be run
+        self.terms_to_run = kwargs.get('terms_to_run', ann_obj.terms)
         # also can limit the nodes for which scores are stored with this
         self.target_prots = kwargs.get('target_nodes', np.arange(len(ann_obj.prots)))
 
@@ -68,7 +51,7 @@ class Runner(object):
         self.params_results = defaultdict(int) 
         # store the node scores for each GO term in a sparse matrix
         # using lil matrix so 0s are automatically not stored
-        self.goid_scores = sp.lil_matrix(ann_obj.ann_matrix.shape, dtype=np.float)
+        self.term_scores = sp.lil_matrix(ann_obj.ann_matrix.shape, dtype=np.float)
 
         # keep track of the weighting method for writing to the output file later
         self.setupParamsStr(net_obj.weight_str, params, name)

@@ -75,7 +75,6 @@ def runFastSinkSource(
     newP, f, = alg_utils.setup_fixed_scores(
         P, positives, negatives, a=a, remove_nonreachable=False)
 
-    #if max_iters > 0:
     if solver is None:
         s, process_time, wall_time, num_iters = FastSinkSource(
             newP, f, max_iters=max_iters, eps=eps, a=a, verbose=verbose)
@@ -130,15 +129,6 @@ def runFastSinkSource(
                 "iters: %d, max_iters: %d, info: %s" % (
                     num_iters, 1000, info) if solver != 'spsolve' else ''))
 
-    #sys.exit()
-    # map back from the indices after deleting pos/neg to the original indices
-    ## the positives will be left as 1, and the rest of the unknown examples will get their score below
-    #scores_arr = np.ones(num_nodes)
-    ## leave the negative examples at 0
-    #if negatives is not None:
-    #    scores_arr[negatives] = 0
-    #indices = [idx2node[n] for n in range(len(s))]
-    #scores_arr[indices] = s
     # keep the positive examples at 1
     s[positives] = 1
 

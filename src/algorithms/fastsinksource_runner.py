@@ -9,16 +9,9 @@ import numpy as np
 
 
 def setupInputs(run_obj):
-    # may need to make sure the inputs match
-    ## if there are more annotations than nodes in the network, then trim the extra pos/neg nodes
-    #num_nodes = self.P.shape[0] if self.weight_gmw is False else self.normalized_nets[0].shape[0]
-    #if len(self.prots) > num_nodes: 
-    #    positives = positives[np.where(positives < num_nodes)]
-    #    negatives = negatives[np.where(negatives < num_nodes)]
-
     # extract the variables out of the annotation object
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
-    run_obj.goids = run_obj.ann_obj.goids
+    run_obj.terms = run_obj.ann_obj.terms
 
     if run_obj.net_obj.weight_swsn:
         # TODO if the net obj already has the W_SWSN object, then use that instead
@@ -26,11 +19,10 @@ def setupInputs(run_obj):
         run_obj.P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=run_obj.params.get('lambda', None))
         run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
     elif run_obj.net_obj.weight_gmw:
-        # this will be handled on a GO term by GO term basis
+        # this will be handled on a term by term basis
         run_obj.P = None
     else:
         run_obj.P = alg_utils.normalizeGraphEdgeWeights(run_obj.net_obj.W, ss_lambda=run_obj.params.get('lambda', None))
-        #run_obj.P = alg_utils._net_normalize(run_obj.net_obj.W)
 
     return
 
@@ -63,42 +55,29 @@ def setupOutputs(run_obj, **kwargs):
     return
 
 
-#def compute_preconditioner(P):
-#    print("running spilu")
-#    start_process_time = time.process_time()
-#    start_wall_time = time.time()
-#    ilu = spilu(M)
-#    process_time = time.process_time() - start_process_time 
-#    wall_time = time.time() - start_wall_time
-#    print("finished in %0.3f sec, %0.3f process time")
-#    Mx = lambda x: ilu.solve(x)
-#    Milu = LinearOperator(P.shape, Mx)
-#    return Milu
-
-
 def run(run_obj):
     """
     Function to run FastSinkSource, FastSinkSourcePlus, Local and LocalPlus
-    *goids_to_run*: goids for which to run the method. 
-        Must be a subset of the goids present in the ann_obj
+    *terms_to_run*: terms for which to run the method. 
+        Must be a subset of the terms present in the ann_obj
     """
     params_results = run_obj.params_results
     P, alg, params = run_obj.P, run_obj.name, run_obj.params
 
     #if 'solver' in params:
-    # make sure the goid_scores matrix is reset
+    # make sure the term_scores matrix is reset
     # because if it isn't empty, overwriting the stored scores seems to be time consuming
-    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
+    term_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     print("Running %s with these parameters: %s" % (alg, params))
     if len(run_obj.target_prots) != len(run_obj.net_obj.nodes):
         print("\tstoring scores for only %d target prots" % (len(run_obj.target_prots)))
 
-    # run FastSinkSource on each GO term individually
+    # run FastSinkSource on each term individually
     #for i in trange(run_obj.ann_matrix.shape[0]):
-    #goid = run_obj.goids[i]
-    for goid in tqdm(run_obj.goids_to_run):
-        idx = run_obj.ann_obj.goid2idx[goid]
-        # get the row corresponding to the current goids annotations 
+    #term = run_obj.terms[i]
+    for term in tqdm(run_obj.terms_to_run):
+        idx = run_obj.ann_obj.term2idx[term]
+        # get the row corresponding to the current terms annotations 
         y = run_obj.ann_matrix[idx,:]
         positives = (y > 0).nonzero()[1]
         negatives = (y < 0).nonzero()[1]
@@ -108,8 +87,8 @@ def run(run_obj):
 
         if run_obj.net_obj.weight_gmw is True:
             start_time = time.process_time()
-            # weight the network for each GO term individually
-            W,_,_ = run_obj.net_obj.weight_GMW(y.toarray()[0], goid)
+            # weight the network for each term individually
+            W,_,_ = run_obj.net_obj.weight_GMW(y.toarray()[0], term)
             P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=params.get('lambda', None))
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
 
@@ -129,11 +108,8 @@ def run(run_obj):
 
         if run_obj.kwargs.get('verbose', False) is True:
             tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
-                    "(%0.4f sec) for %s" % (process_time, goid))
+                    "(%0.4f sec) for %s" % (process_time, term))
 
-        ## if they're different dimensions, then set the others to zeros 
-        #if len(scores_arr) < goid_scores.shape[1]:
-        #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
         # limit the scores to the target nodes
         if len(run_obj.target_prots) != len(scores):
             #print("\tstoring results for %d target prots" % (len(run_obj.target_prots)))
@@ -141,14 +117,14 @@ def run(run_obj):
             mask[run_obj.target_prots] = False
             scores[mask] = 0
         # 0s are not explicitly stored in lil matrix
-        goid_scores[idx] = scores
+        term_scores[idx] = scores
 
         # also keep track of the time it takes for each of the parameter sets
         alg_name = "%s%s" % (alg, run_obj.params_str)
         params_results["%s_wall_time"%alg_name] += wall_time
         params_results["%s_process_time"%alg_name] += process_time
 
-    run_obj.goid_scores = goid_scores
+    run_obj.term_scores = term_scores
     run_obj.params_results = params_results
     return
 

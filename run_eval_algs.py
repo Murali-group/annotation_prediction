@@ -16,23 +16,12 @@ sys.path.insert(0,os.path.dirname(__file__))
 import src.setup_sparse_networks as setup
 import src.algorithms.alg_utils as alg_utils
 import src.algorithms.runner as runner
-import src.algorithms.aptrank_birgrank.run_birgrank as run_birgrank
 import src.evaluate.eval_utils as eval_utils
 import src.evaluate.cross_validation as cross_validation
 import src.evaluate.eval_leave_one_species_out as eval_loso
 import src.utils.file_utils as utils
 import src.utils.string_utils as string_utils
-import src.utils.ontology_utils as go_utils
 
-
-#class Alg_Runner:
-#    def __init__(self, net_version, exp_name, net_obj, ann_obj, runners, **kwargs):
-#    
-#        self.net_version = net_version
-#        self.exp_name = exp_name
-#        self.kwargs = kwargs
-#        self.verbose = kwargs.get('verbose', False) 
-#        self.forced = kwargs.get('forcealg', False) 
 
 
 def parse_args():
@@ -43,10 +32,6 @@ def parse_args():
         #config_map = yaml.load(conf, Loader=yaml.FullLoader)
         config_map = yaml.load(conf)
     # TODO check to make sure the inputs are correct in config_map
-
-    #if opts.exp_name is None or opts.pos_neg_file is None:
-    #    print("--exp-name, --pos-neg-file, required")
-    #    sys.exit(1)
 
     return config_map, kwargs
 
@@ -59,8 +44,8 @@ def setup_opts():
     group = parser.add_argument_group('Main Options')
     group.add_argument('--config', type=str, default="config-files/config.yaml",
             help="Configuration file")
-    group.add_argument('--goterm', '-G', type=str, action="append",
-            help="Specify the GO terms to use. Can use this option multiple times")
+    group.add_argument('--term', '-T', type=str, action="append",
+            help="Specify the terms to use. Can use this option multiple times")
 
     # evaluation parameters
     group = parser.add_argument_group('Evaluation options')
@@ -77,7 +62,7 @@ def setup_opts():
             help="Leave-One-Species-Out evaluation. For each species, leave out all of its annotations " +
             "and evaluate how well they can be recovered from the annotations of the other species. " +
             "Must specify the 'taxon_file' in the config file")
-    group.add_argument('--taxon', '-T', dest="taxons", type=str, action='append',
+    group.add_argument('--taxon', '-S', dest="taxons", type=str, action='append',
             help="Specify the species taxonomy ID for which to evaluate. Multiple may be specified. Otherwise, all species will be used")
     group.add_argument('--write-prec-rec', action="store_true", default=False,
             help="Also write a file containing the precision and recall for every positive example. " + \
@@ -94,9 +79,6 @@ def setup_opts():
     group.add_argument('--factor-pred-to-write', '-N', type=float, 
             help="Write the predictions <factor>*num_pos for each term to file. " +
             "For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
-    # TODO finish adding this option
-    #group.add_argument('-T', '--ground-truth-file', type=str,
-    #                 help="File containing true annotations with which to evaluate predictions")
     group.add_argument('--postfix', type=str, 
             help="String to add to the end of the output file name(s)")
     group.add_argument('--forcealg', action="store_true", default=False,
@@ -116,7 +98,8 @@ def run(config_map, **kwargs):
     output_settings = config_map['output_settings']
     postfix = kwargs.get("postfix")
     # combine the evaluation settings in the config file and the kwargs
-    kwargs.update(config_map['eval_settings'])
+    if 'eval_settings' in config_map:
+        kwargs.update(config_map['eval_settings'])
     # if specified, use this postfix, meaning overwrite the postfix from the yaml file
     if postfix is not None:
         kwargs['postfix'] = postfix
@@ -127,15 +110,11 @@ def run(config_map, **kwargs):
     for dataset in input_settings['datasets']:
         # add options specified for this dataset to kwargs  
         # youngs_neg: for a term t, a gene g cannot be a negative for t if g shares an annotation with any gene annotated to t 
-        kwargs['youngs_neg'] = dataset.get('youngs_neg') 
-        # leaf_terms_only: limit the terms to only those that are the most specific, meaning remove the ancestors of all terms 
-        kwargs['leaf_terms_only'] = dataset.get('leaf_terms_only') 
-        # sp_leaf_terms_only: limit the terms to only those that are the most specific, meaning remove the ancestors of all terms 
-        kwargs['sp_leaf_terms_only'] = dataset.get('sp_leaf_terms_only') 
+        #kwargs['youngs_neg'] = dataset.get('youngs_neg') 
 
         net_obj, ann_obj, eval_ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
         # if there are no annotations, then skip this dataset
-        if len(ann_obj.goids) == 0:
+        if len(ann_obj.terms) == 0:
             print("No terms found. Skipping this dataset")
             continue
         # the outputs will follow this structure:
@@ -158,9 +137,6 @@ def run(config_map, **kwargs):
             # use it to evaluate the predictions
             if eval_ann_obj is not None:
                 exp_type = "eval"
-                # For LOSO, 'all-sp-loso' was used in the past
-                #if kwargs.get('keep_ann') is not None:
-                #    exp_type="all-sp-loso" 
                 for run_obj in alg_runners:
                     out_file = "%s/%s%s%s.txt" % (
                         run_obj.out_dir, exp_type, run_obj.params_str, kwargs.get("postfix", ""))
@@ -170,7 +146,7 @@ def run(config_map, **kwargs):
 
         if kwargs['cross_validation_folds'] is not None:
             # run cross validation
-            cross_validation.run_cv_all_goterms(alg_runners, ann_obj, folds=kwargs['cross_validation_folds'], **kwargs)
+            cross_validation.run_cv_all_terms(alg_runners, ann_obj, folds=kwargs['cross_validation_folds'], **kwargs)
 
         if kwargs['loso'] is True:
             # add the taxon file paths for this dataset to kwargs
@@ -233,15 +209,12 @@ def setup_net(input_dir, dataset, **kwargs):
 
 def load_annotations(prots, dataset, input_dir, **kwargs):
     # limit the terms to whatever is specified either in the only_functions_file,
-    # or the --goterm command-line option
+    # or the --term command-line option
     only_functions_file = None
-    # if specific goterms are passed in_then ignore the only functions file
-    #if kwargs['goterm'] is None and 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
-    # for SWSN to be correct, cannot limit to a single term with kwargs['goterm']
     # TODO add a 'test' option or something to be able to limit to a single term
     if 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
         only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
-    selected_terms = alg_utils.select_goterms(only_functions_file=only_functions_file) 
+    selected_terms = alg_utils.select_terms(only_functions_file=only_functions_file) 
 
     # write/load the processed annotation matrix in a pos_neg_file version of the network folder
     # TODO this is hacky, but works for now
@@ -252,24 +225,13 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     sparse_ann_file = "%s/%s/sparse-anns/%s.npz" % (input_dir, dataset['net_version'], pos_neg_str)
     # now build the annotation matrix
     pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
-    obo_file = "%s/%s" % (input_dir, dataset['obo_file'])
     ann_obj = setup.create_sparse_ann_and_align_to_net(
-            obo_file, pos_neg_file, sparse_ann_file, prots, **kwargs)
+            pos_neg_file, sparse_ann_file, prots, **kwargs)
 
-    if kwargs.get('leaf_terms_only'):
-        terms = selected_terms if selected_terms is not None else ann_obj.goids
-        # limit the terms to only those that are the most specific (i.e., leaf terms),
-        # meaning remove the ancestors of all terms 
-        leaf_terms = go_utils.get_most_specific_terms(terms, ann_obj=ann_obj)
-        print("\t%d / %d terms are most specific, or leaf terms" % (len(leaf_terms), len(terms)))
-        if selected_terms is not None:
-            selected_terms &= leaf_terms 
-        else:
-            selected_terms = leaf_terms 
     if selected_terms is not None:
         ann_obj.limit_to_terms(selected_terms)
     else:
-        selected_terms = ann_obj.goids
+        selected_terms = ann_obj.terms
 
     eval_ann_obj = None
     # also check if an evaluation pos_neg_file was given
@@ -380,12 +342,10 @@ def run_algs(alg_runners, **kwargs):
             for i in range(run_obj.ann_matrix.shape[0]):
                 y = run_obj.ann_matrix[i,:]
                 positives = (y > 0).nonzero()[1]
-                num_pred_to_write[run_obj.goids[i]] = len(positives) * kwargs['factor_pred_to_write']
+                num_pred_to_write[run_obj.terms[i]] = len(positives) * kwargs['factor_pred_to_write']
         if num_pred_to_write != 0:
-            # TODO generate the output file paths in the runner object
-            #out_file = run_obj.out_file
             utils.checkDir(os.path.dirname(run_obj.out_file)) 
-            alg_utils.write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
+            alg_utils.write_output(run_obj.term_scores, run_obj.ann_obj.terms, run_obj.ann_obj.prots,
                          run_obj.out_file, num_pred_to_write=num_pred_to_write)
 
     eval_loso.write_stats_file(runners_to_run, params_results)

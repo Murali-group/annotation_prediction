@@ -27,16 +27,16 @@ def str_(s):
     return str(s).replace('.','_')
 
 
-def select_goterms(only_functions_file=None, goterms=None):
-    selected_goterms = set()
+def select_terms(only_functions_file=None, terms=None):
+    selected_terms = set()
     if only_functions_file is not None:
-        selected_goterms = utils.readItemSet(only_functions_file, 1)
-        print("%d functions from only_functions_file: %s" % (len(selected_goterms), only_functions_file))
-    goterms = set() if goterms is None else set(goterms)
-    selected_goterms.update(goterms)
-    if len(selected_goterms) == 0:
-        selected_goterms = None
-    return selected_goterms
+        selected_terms = utils.readItemSet(only_functions_file, 1)
+        print("%d functions from only_functions_file: %s" % (len(selected_terms), only_functions_file))
+    terms = set() if terms is None else set(terms)
+    selected_terms.update(terms)
+    if len(selected_terms) == 0:
+        selected_terms = None
+    return selected_terms
 
 
 def setup_sparse_network(network_file, node2idx_file=None, forced=False):
@@ -155,19 +155,19 @@ def _net_normalize(W, axis=0):
     return P
 
 
-def get_goid_pos_neg(ann_matrix, i):
+def get_term_pos_neg(ann_matrix, i):
     """
     The matrix should be lil format as others don't have the getrowview option
     """
-    # get the row corresponding to the current goids annotations 
-    #goid_ann = ann_matrix[i,:].toarray().flatten()
-    #positives = np.where(goid_ann > 0)[0]
-    #negatives = np.where(goid_ann < 0)[0]
+    # get the row corresponding to the current terms annotations 
+    #term_ann = ann_matrix[i,:].toarray().flatten()
+    #positives = np.where(term_ann > 0)[0]
+    #negatives = np.where(term_ann < 0)[0]
     # may be faster with a lil matrix, but takes a lot more RAM
-    #goid_ann = ann_matrix.getrowview(i)
-    goid_ann = ann_matrix[i,:]
-    positives = (goid_ann > 0).nonzero()[1]
-    negatives = (goid_ann < 0).nonzero()[1]
+    #term_ann = ann_matrix.getrowview(i)
+    term_ann = ann_matrix[i,:]
+    positives = (term_ann > 0).nonzero()[1]
+    negatives = (term_ann < 0).nonzero()[1]
     return positives, negatives
 
 
@@ -311,55 +311,55 @@ def select_nodes(mat, indices):
 
 
 # no longer needed
-def parse_pos_neg_files(pos_neg_files, goterms=None):
+def parse_pos_neg_files(pos_neg_files, terms=None):
     # get the positives and negatives from the matrix
-    all_goid_prots = {}
-    all_goid_neg = {}
+    all_term_prots = {}
+    all_term_neg = {}
     for pos_neg_file in pos_neg_files:
-        #goid_prots, goid_neg = self.parse_pos_neg_matrix(self.pos_neg_file)
-        goid_prots, goid_neg = parse_pos_neg_file(pos_neg_file, goterms=goterms)
-        all_goid_prots.update(goid_prots)
-        all_goid_neg.update(goid_neg)
+        #term_prots, term_neg = self.parse_pos_neg_matrix(self.pos_neg_file)
+        term_prots, term_neg = parse_pos_neg_file(pos_neg_file, terms=terms)
+        all_term_prots.update(term_prots)
+        all_term_neg.update(term_neg)
 
-    return all_goid_prots, all_goid_neg
+    return all_term_prots, all_term_neg
 
 
-def parse_pos_neg_file(pos_neg_file, goterms=None):
+def parse_pos_neg_file(pos_neg_file, terms=None):
     print("Reading positive and negative annotations for each protein from %s" % (pos_neg_file))
-    goid_prots = {}
-    goid_neg = {}
+    term_prots = {}
+    term_neg = {}
     all_prots = set()
     # TODO possibly use pickle
     if not os.path.isfile(pos_neg_file):
         print("Warning: %s file not found" % (pos_neg_file))
-        return goid_prots, goid_neg
+        return term_prots, term_neg
 
-        #for goid, pos_neg_assignment, prots in utils.readColumns(pos_neg_file, 1,2,3):
+        #for term, pos_neg_assignment, prots in utils.readColumns(pos_neg_file, 1,2,3):
     with open(pos_neg_file, 'r') as f:
         for line in f:
             if line[0] == '#':
                 continue
-            goid, pos_neg_assignment, prots = line.rstrip().split('\t')[:3]
-            if goterms and goid not in goterms:
+            term, pos_neg_assignment, prots = line.rstrip().split('\t')[:3]
+            if terms and term not in terms:
                 continue
             prots = set(prots.split(','))
             if int(pos_neg_assignment) == 1:
-                goid_prots[goid] = prots
+                term_prots[term] = prots
             elif int(pos_neg_assignment) == -1:
-                goid_neg[goid] = prots
+                term_neg[term] = prots
 
             all_prots.update(prots)
 
-    print("\t%d GO terms, %d prots" % (len(goid_prots), len(all_prots)))
+    print("\t%d GO terms, %d prots" % (len(term_prots), len(all_prots)))
 
-    return goid_prots, goid_neg
+    return term_prots, term_neg
 
 
-def write_output(goid_scores, goids, prots, out_file, 
-        num_pred_to_write=10, goid2idx=None):
+def write_output(term_scores, terms, prots, out_file, 
+        num_pred_to_write=10, term2idx=None):
     """
     *num_pred_to_write* can either be an integer, or a dictionary with a number of predictions to write for each term
-    *goid2idx*: if only a subset of terms will be written, goid2idx gives the index (row) of those terms in the matrix
+    *term2idx*: if only a subset of terms will be written, term2idx gives the index (row) of those terms in the matrix
     """
     # make sure the output file exists
     if '/' in out_file:
@@ -372,28 +372,28 @@ def write_output(goid_scores, goids, prots, out_file,
         print("\twriting top %d scores to %s" % (num_pred_to_write, out_file))
 
     with open(out_file, 'w') as out:
-        out.write("#goterm\tprot\tscore\n")
-        for i, goid in enumerate(goids):
-            if len(goids) < goid_scores.shape[0]:
-                if goid2idx is not None:
-                    i = goid2idx[goid]
+        out.write("#term\tprot\tscore\n")
+        for i, term in enumerate(terms):
+            if len(terms) < term_scores.shape[0]:
+                if term2idx is not None:
+                    i = term2idx[term]
                 else:
-                    raise Exception("%d goids < %d goid rows in scores matrix. Must pass goid2idx dict" % (
-                        len(goids), goid_scores.shape[0]))
+                    raise Exception("%d terms < %d term rows in scores matrix. Must pass term2idx dict" % (
+                        len(terms), term_scores.shape[0]))
             num_to_write = num_pred_to_write
-            scores = goid_scores[i].toarray().flatten()
+            scores = term_scores[i].toarray().flatten()
             #print("debug: %d nodes with a non-zero score" % (np.count_nonzero(scores)))
             #print(np.sort(scores)[::-1][:num_to_write])
             # convert the nodes back to their names, and make a dictionary out of the scores
             # UPDATE: only write the non-zero scores since those nodes don't have a score
             scores = {prots[j]:s for j, s in enumerate(scores) if s != 0}
             if isinstance(num_to_write, dict):
-                num_to_write = num_pred_to_write[goids[i]]
-            write_scores_to_file(scores, goid=goid, file_handle=out,
+                num_to_write = num_pred_to_write[terms[i]]
+            write_scores_to_file(scores, term=term, file_handle=out,
                     num_pred_to_write=int(num_to_write))
 
 
-def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
+def write_scores_to_file(scores, term='', out_file=None, file_handle=None,
         num_pred_to_write=100, header="", append=True):
     """
     *scores*: dictionary of node_name: score
@@ -406,10 +406,10 @@ def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
 
     if out_file is not None:
         if append:
-            print("Appending %d scores for goterm %s to %s" % (num_pred_to_write, goid, out_file))
+            print("Appending %d scores for term %s to %s" % (num_pred_to_write, term, out_file))
             out_type = 'a'
         else:
-            print("Writing %d scores for goterm %s to %s" % (num_pred_to_write, goid, out_file))
+            print("Writing %d scores for term %s to %s" % (num_pred_to_write, term, out_file))
             out_type = 'w'
 
         file_handle = open(out_file, out_type)
@@ -420,6 +420,6 @@ def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
     # write the scores to a file, up to the specified number of nodes (num_pred_to_write)
     file_handle.write(header)
     for n in sorted(scores, key=scores.get, reverse=True)[:num_pred_to_write]:
-        file_handle.write("%s\t%s\t%0.4e\n" % (goid, n, scores[n]))
+        file_handle.write("%s\t%s\t%0.4e\n" % (term, n, scores[n]))
     return
 

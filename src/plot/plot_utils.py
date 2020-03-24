@@ -212,7 +212,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
                 sys.exit()
             # limit to the specified terms
             if kwargs['only_terms'] is not None:
-                df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
+                df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
 
             title = '-'.join(df_all['plot_exp_name'].unique())
             plot_curves(df_all, title=title, **kwargs)
@@ -224,12 +224,12 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             sys.exit()
         # limit to the specified terms
         if kwargs.get('only_terms') is not None:
-            df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
-        num_terms = df_all['#goid'].nunique()
+            df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
+        num_terms = df_all['#term'].nunique()
         if kwargs['exp_type'] == "loso":
-            sp_taxon_pairs = df_all['#taxon'].astype(str) + df_all['#goid']
+            sp_taxon_pairs = df_all['#taxon'].astype(str) + df_all['#term']
             num_terms = sp_taxon_pairs.nunique()
-            #num_terms = df_all.groupby(['#taxon', '#goid']).size()
+            #num_terms = df_all.groupby(['#taxon', '#term']).size()
         algs = df_all['Algorithm'].unique()
 
         print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
@@ -577,8 +577,8 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
     Plot precision recall curves, or (TODO) ROC curves 
     """
     # make a prec-rec plot per term
-    for term in sorted(df["#goid"].unique()):
-        curr_df = df[df['#goid'] == term]
+    for term in sorted(df["#term"].unique()):
+        curr_df = df[df['#term'] == term]
         # get only the positive examples to plot prec_rec
         curr_df = curr_df[curr_df['pos/neg'] == 1]
         # also put the fmax on the plot, and add it to the label
@@ -633,8 +633,8 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
     if kwargs['exp_type'] == "loso":
-        df['taxon-goid'] = df['#taxon'].map(str) + '-' + df['#goid']
-        index_col = 'taxon-goid'
+        df['taxon-term'] = df['#taxon'].map(str) + '-' + df['#term']
+        index_col = 'taxon-term'
     else:
         # change the index to the terms
         index_col = df.columns[0]
@@ -859,7 +859,7 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
 def get_most_specific_sp_term_pairs(df, go_dags, **kwargs):
     # figure out which DAG this is
     for h, dag in go_dags.items():
-        t = df['#goid'].values[0]
+        t = df['#term'].values[0]
         if dag.has_node(t):
             break
     print("\tusing %s hierarchy" % (h))
@@ -867,11 +867,11 @@ def get_most_specific_sp_term_pairs(df, go_dags, **kwargs):
     new_df = pd.DataFrame()
     # for each species, limit to the terms which have no descendants
     for taxon, df_t in df.groupby('#taxon'):
-        terms = get_most_specific_terms(df_t['#goid'].values, dag)
-        df_t = df_t[df_t['#goid'].isin(terms)]
+        terms = get_most_specific_terms(df_t['#term'].values, dag)
+        df_t = df_t[df_t['#term'].isin(terms)]
         new_df = pd.concat([new_df, df_t])
     print("\t%d sp-term pairs limited to %d most specific sp-term pairs" % (
-        (df['#taxon'].astype(str) + df['#goid']).nunique(), (new_df['#taxon'].astype(str) + new_df['#goid']).nunique()))
+        (df['#taxon'].astype(str) + df['#term']).nunique(), (new_df['#taxon'].astype(str) + new_df['#term']).nunique()))
     #print(new_df['#taxon'].nunique())
     #print(new_df.head())
     #sys.exit()

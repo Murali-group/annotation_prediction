@@ -14,11 +14,11 @@ except ImportError:
     pass
 
 
-def run_cv_all_goterms(
+def run_cv_all_terms(
         alg_runners, ann_obj, folds=5, num_reps=1, 
         cv_seed=None, **kwargs):
     """
-    Split the positives and negatives into folds across all GO terms
+    Split the positives and negatives into folds across all terms
     and then run the algorithms on those folds.
     Algorithms are all run on the same split of data. 
     *num_reps*: Number of times to repeat cross-validation. 
@@ -27,7 +27,7 @@ def run_cv_all_goterms(
         If *num_reps* > 1, the seed will be incremented by 1 each time
     """
     ann_matrix = ann_obj.ann_matrix
-    goids, prots = ann_obj.goids, ann_obj.prots
+    terms, prots = ann_obj.terms, ann_obj.prots
 
     # set the cv_seed if specified
     # 2019-06-26 BUG: If there are a different number of terms, or the order of the terms changed, then the results won't be the same
@@ -37,7 +37,7 @@ def run_cv_all_goterms(
 
     # first check to see if the algorithms have already been run
     # and if the results should be overwritten
-    if kwargs['forcealg'] is True or len(goids) == 1:
+    if kwargs['forcealg'] is True or len(terms) == 1:
         # runners_to_run is a list of runners for each repitition
         runners_to_run = {i: alg_runners for i in range(1,num_reps+1)}
     else:
@@ -68,7 +68,7 @@ def run_cv_all_goterms(
             # add the current repitition number to the seed
             curr_seed += rep-1
         # split the annotation matrix into training and testing matrices K times
-        ann_matrix_folds = split_cv_all_goterms(ann_obj, folds=folds, seed=curr_seed, **kwargs)
+        ann_matrix_folds = split_cv_all_terms(ann_obj, folds=folds, seed=curr_seed, **kwargs)
 
         for run_obj in runners_to_run[rep]:
             # because each fold contains a different set of positives, and combined they contain all positives,
@@ -79,7 +79,7 @@ def run_cv_all_goterms(
                 print("Fold %d" % (curr_fold+1))
 
                 # change the annotation matrix to the current fold
-                curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, goids, prots)
+                curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, terms, prots)
                 # replace the ann_obj in the runner with the current fold's annotations  
                 run_obj.ann_obj = curr_ann_obj
                 #alg_runners = run_eval_algs.setup_runners([alg], alg_settings, net_obj, curr_ann_obj, **kwargs)
@@ -91,18 +91,17 @@ def run_cv_all_goterms(
                 run_obj.setupOutputs()
 
                 # store only the scores of the test (left out) positives and negatives
-                for i in range(len(goids)):
-                    test_pos, test_neg = alg_utils.get_goid_pos_neg(test_ann_mat, i)
-                    curr_goid_scores = run_obj.goid_scores[i].toarray().flatten()
+                for i in range(len(terms)):
+                    test_pos, test_neg = alg_utils.get_term_pos_neg(test_ann_mat, i)
+                    curr_term_scores = run_obj.term_scores[i].toarray().flatten()
                     curr_comb_scores = combined_fold_scores[i].toarray().flatten()
-                    curr_comb_scores[test_pos] = curr_goid_scores[test_pos]
-                    curr_comb_scores[test_neg] = curr_goid_scores[test_neg]
+                    curr_comb_scores[test_pos] = curr_term_scores[test_pos]
+                    curr_comb_scores[test_neg] = curr_term_scores[test_neg]
                     combined_fold_scores[i] = curr_comb_scores 
 
-            # replace the goid_scores in the runner to combined_fold_scores to evaluate
-            run_obj.goid_scores = combined_fold_scores 
+            # replace the term_scores in the runner to combined_fold_scores to evaluate
+            run_obj.term_scores = combined_fold_scores 
 
-            #curr_goids = dag_goids if alg == 'birgrank' else goids
             # now evaluate the results and write to a file
             out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
                 run_obj.out_dir, folds, rep,
@@ -117,17 +116,17 @@ def run_cv_all_goterms(
     return
 
 
-def split_cv_all_goterms(ann_obj, folds=5, seed=None, **kwargs):
+def split_cv_all_terms(ann_obj, folds=5, seed=None, **kwargs):
     """
-    Split the positives and negatives into folds across all GO terms
+    Split the positives and negatives into folds across all terms
     *seed*: the seed used by the random number generator when generating the folds. If None, the np.random RandomState will be used
     *returns*: a list of tuples containing the (train pos, train neg, test pos, test neg)
     """
     ann_matrix = ann_obj.ann_matrix
-    goids, prots = ann_obj.goids, ann_obj.prots
-    print("Splitting all annotations into %d folds by splitting each GO terms annotations into folds, and then combining them" % (folds))
-    # TODO there must be a better way to do this than getting the folds in each go term separately
-    # but thi at least ensures that each GO term has evenly split annotations
+    terms, prots = ann_obj.terms, ann_obj.prots
+    print("Splitting all annotations into %d folds by splitting each terms annotations into folds, and then combining them" % (folds))
+    # TODO there must be a better way to do this than getting the folds in each term separately
+    # but thi at least ensures that each term has evenly split annotations
     # list of tuples containing the (train pos, train neg, test pos, test neg) 
     ann_matrix_folds = []
     for i in range(folds):
@@ -136,12 +135,12 @@ def split_cv_all_goterms(ann_obj, folds=5, seed=None, **kwargs):
         ann_matrix_folds.append((train_ann_mat, test_ann_mat))
 
     for i in trange(ann_matrix.shape[0]):
-        goid = goids[i]
-        positives, negatives = alg_utils.get_goid_pos_neg(ann_matrix, i)
+        term = terms[i]
+        positives, negatives = alg_utils.get_term_pos_neg(ann_matrix, i)
         # if there are less positives or negatives than there are folds, this will give an error
         if len(positives) < folds or len(negatives) < folds:
             continue
-        # print("%d positives, %d negatives for goterm %s" % (len(positives), len(negatives), goid))
+        # print("%d positives, %d negatives for term %s" % (len(positives), len(negatives), term))
         # split the set of positives and the set of negatives into K folds separately
         kf = KFold(n_splits=folds, shuffle=True, random_state=seed)
         kf.get_n_splits(positives)

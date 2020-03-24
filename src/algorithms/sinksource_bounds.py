@@ -189,22 +189,6 @@ class SinkSourceBounds:
                 # compare the two rankings
                 # for example: curr rank: [1,0], orig rank: [0,1] 
                 self.kendalltau_list.append(kendalltau(compare_ranks, range(len(self.ranks_to_compare)))[0])
-                # this is no longer needed
-                #self.spearmanr_list.append(spearmanr(compare_ranks, range(len(self.ranks_to_compare)))[0])
-#                # TODO speed up computing these evaluation measures.
-#                # skipping for now.
-#                if self.rank_pos_neg is not None:
-#                    # need to include all nodes because otherwise the recall will be higher
-#                    # from the unreachable positives that were removed
-#                    scores_arr = np.zeros(self.num_nodes)
-#                    indices = [self.idx2node[n] for n in range(len(LBs))]
-#                    scores_arr[indices] = LBs
-#                    prec, recall, fpr = eval_utils.compute_eval_measures(scores_arr, self.rank_pos_neg[0], self.rank_pos_neg[1])
-#                    fmax = eval_utils.compute_fmax(prec, recall)
-#                    avgp = eval_utils.compute_avgp(prec, recall)
-#                    auprc = eval_utils.compute_auprc(prec, recall)
-#                    #auroc = alg_utils.compute_auroc([r for r, f in fpr], [f for r, f in fpr])
-#                    self.eval_stats_list.append((fmax, avgp, auprc))
 
         self.total_time = time.process_time() - start_time
         self.total_comp += len(self.P.data)*self.num_iters
@@ -300,104 +284,5 @@ class SinkSourceBounds:
 
         not_fixed_nodes |= zero_nodes
         return not_fixed_nodes, max_unranked_stretch
-
-
-    # UPDATE 2020-02-12: This function is a backup of what used to be done. 
-    #   We shouldn't be giving information to the method about which nodes were the left-out positives
-    #   and which were the left-out negatives
-#    def check_fixed_rankings_backup(self, LBs, UBs, unranked_nodes=None, unr_pos_nodes=None, unr_neg_nodes=None):
-#        """
-#        *nodes_to_rank*: a set of nodes for which to check which nodes have an overlapping UB/LB.
-#            In other words, get the nodes that are causing the given set of nodes to not have their ranks fixed
-#        UPDATE: 
-#        *unr_pos_nodes*: set of positive nodes that are not fixed. 
-#            only need to check for overlap with negative nodes 
-#        *unr_neg_nodes*: set of negative nodes that are not fixed. 
-#            only need to check for overlap with positive nodes
-#        """
-#        # find all of the nodes in the top-k whose rankings are fixed
-#        # n comparisons
-#        all_scores = []
-#        # also keep track of the # of nodes in a row that have overlapping upper or lower bounds
-#        # for now just keep track of the biggest
-#        max_unranked_stretch = 0
-#        i = 0
-#        if unranked_nodes is not None:
-#            for n in unranked_nodes:
-#                all_scores.append((n, LBs[n]))
-#            all_scores_sorted = sorted(all_scores, key=lambda x: (x[1]), reverse=True)
-#            # the fixed nodes are the nodes that are not in the 
-#            # "still not fixed" set
-#            still_not_fixed_nodes = set()
-#            # for every node, check if the next node's LB+UB > the curr node's LB.
-#            # If so, the node is not yet fixed
-#            while i+1 < len(all_scores_sorted):
-#                curr_LB = all_scores_sorted[i][1]
-#                curr_i = i
-#                while i+1 < len(all_scores_sorted) and \
-#                      curr_LB < UBs[all_scores_sorted[i+1][0]]:
-#                    still_not_fixed_nodes.add(all_scores_sorted[i+1][0])
-#                    #print("i+1: %d not fixed" % (i+1))
-#                    i += 1
-#                if curr_i != i:
-#                    #print("i: %d not fixed" % (curr_i))
-#                    still_not_fixed_nodes.add(all_scores_sorted[curr_i][0])
-#                    if i - curr_i > max_unranked_stretch:
-#                        max_unranked_stretch = i - curr_i
-#                if curr_i == i:
-#                    i += 1
-#                #    fixed_nodes.add(all_scores_sorted[i][0])
-#            return still_not_fixed_nodes, max_unranked_stretch
-#        elif unr_pos_nodes is not None and unr_neg_nodes is not None:
-#            # if there aren't any nodes to check their ranking, then simply return
-#            if len(unr_pos_nodes) == 0 or len(unr_neg_nodes) == 0:
-#                return set(), set()
-#            for n in unr_pos_nodes:
-#                all_scores.append((n, LBs[n]))
-#            for n in unr_neg_nodes:
-#                all_scores.append((n, LBs[n]))
-#            all_scores_sorted = sorted(all_scores, key=lambda x: (x[1]), reverse=True)
-#            fixed_nodes = unr_pos_nodes | unr_neg_nodes
-#            # for every node, check if the next node's LB+UB > the curr node's LB.
-#            # and if one of the overlapping nodes is opposite 
-#            # If so, the node is not yet fixed
-#            curr_node = all_scores_sorted[0][0]
-#            opp_set_pos = False if curr_node in unr_pos_nodes else True
-#            opp_set = unr_pos_nodes if opp_set_pos else unr_neg_nodes
-#            while i+1 < len(all_scores_sorted):
-#                curr_node = all_scores_sorted[i][0]
-#                curr_LB = all_scores_sorted[i][1]
-#                # if this is a positive, just check the negatives
-#                # and vice versa
-#                curr_i = i
-#                opp_overlap = False 
-#                last_opp_node = None
-#                while i+1 < len(all_scores_sorted) and \
-#                      curr_LB < UBs[all_scores_sorted[i+1][0]]:
-#                    next_node = all_scores_sorted[i+1][0]
-#                    if next_node in opp_set:
-#                        opp_overlap = True
-#                        last_opp_node = i+1 
-#                    i += 1
-#                if opp_overlap is True:
-#                    # if there was an overlap with an opposite node,
-#                    # all of these are not fixed
-#                    for j in range(curr_i, i+1):
-#                        j_node = all_scores_sorted[j][0]
-#                        fixed_nodes.discard(j_node)
-#                    i = last_opp_node
-#                    # flip the opposite set
-#                    opp_set_pos = False if opp_set_pos else True
-#                    opp_set = unr_pos_nodes if opp_set_pos else unr_neg_nodes
-#                else:
-#                    # only need to increment here if there was no overlap
-#                    i += 1
-#                    
-#            unr_pos_nodes -= fixed_nodes 
-#            unr_neg_nodes -= fixed_nodes 
-#            return unr_pos_nodes, unr_neg_nodes
-#        else:
-#            print("Error: need to pass either the 'unranked_nodes' set or both 'pos_nodes' and 'neg_nodes'")
-#            return
 
 

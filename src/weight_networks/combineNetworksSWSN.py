@@ -27,19 +27,17 @@ def combineNetworksSWSN(y, W, verbose=False):
     *returns*: list of weights alpha, and indices of the networks in W for those weights
     """
 
-    #print(y.shape)
-    #print(y)
-    num_goterms, num_prots = y.shape
+    num_terms, num_prots = y.shape
     num_networks = len(W)
     # numpy doesn't allow storing arrays of various sizes in an array
     # so just store them in lists and convert to an array later
-    omegas = [0]*num_goterms
-    t_list = [0]*num_goterms
+    omegas = [0]*num_terms
+    t_list = [0]*num_terms
 
     # Calculate the # of times i is positive
     # and the # of times (i,j) is positive
     # build the t vectors for each category
-    for i in trange(num_goterms, disable=False if verbose else True):
+    for i in trange(num_terms, disable=False if verbose else True):
         # TODO the matlab code has the y matrix transformed
         curr_y = y[i].toarray()[0]
         pos_idx = np.where(curr_y > 0)[0]
@@ -98,7 +96,7 @@ def combineNetworksSWSN(y, W, verbose=False):
         omegaTt = np.zeros(len(viableIndices)+1)
 
         # calculate the sum of all of the omegas
-        for i in range(num_goterms):
+        for i in range(num_terms):
 
             omegaTomega[0,0] = omegaTomega[0,0] + 1 / float(omegas[i].shape[0])
             curr_omega = omegas[i][:,viableIndices]
