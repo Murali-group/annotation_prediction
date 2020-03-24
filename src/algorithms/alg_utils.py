@@ -354,3 +354,72 @@ def parse_pos_neg_file(pos_neg_file, goterms=None):
 
     return goid_prots, goid_neg
 
+
+def write_output(goid_scores, goids, prots, out_file, 
+        num_pred_to_write=10, goid2idx=None):
+    """
+    *num_pred_to_write* can either be an integer, or a dictionary with a number of predictions to write for each term
+    *goid2idx*: if only a subset of terms will be written, goid2idx gives the index (row) of those terms in the matrix
+    """
+    # make sure the output file exists
+    if '/' in out_file:
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    # now write the scores to a file
+    if isinstance(num_pred_to_write, dict):
+        #print("\twriting top %d*num_pred scores to %s" % (kwargs['factor_pred_to_write'], out_file))
+        print("\twriting top <factor>*num_pred scores to %s" % (out_file))
+    else:
+        print("\twriting top %d scores to %s" % (num_pred_to_write, out_file))
+
+    with open(out_file, 'w') as out:
+        out.write("#goterm\tprot\tscore\n")
+        for i, goid in enumerate(goids):
+            if len(goids) < goid_scores.shape[0]:
+                if goid2idx is not None:
+                    i = goid2idx[goid]
+                else:
+                    raise Exception("%d goids < %d goid rows in scores matrix. Must pass goid2idx dict" % (
+                        len(goids), goid_scores.shape[0]))
+            num_to_write = num_pred_to_write
+            scores = goid_scores[i].toarray().flatten()
+            #print("debug: %d nodes with a non-zero score" % (np.count_nonzero(scores)))
+            #print(np.sort(scores)[::-1][:num_to_write])
+            # convert the nodes back to their names, and make a dictionary out of the scores
+            # UPDATE: only write the non-zero scores since those nodes don't have a score
+            scores = {prots[j]:s for j, s in enumerate(scores) if s != 0}
+            if isinstance(num_to_write, dict):
+                num_to_write = num_pred_to_write[goids[i]]
+            write_scores_to_file(scores, goid=goid, file_handle=out,
+                    num_pred_to_write=int(num_to_write))
+
+
+def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
+        num_pred_to_write=100, header="", append=True):
+    """
+    *scores*: dictionary of node_name: score
+    *num_pred_to_write*: number of predictions (node scores) to write to the file 
+        (sorted by score in decreasing order). If -1, all will be written
+    """
+
+    if num_pred_to_write == -1:
+        num_pred_to_write = len(scores) 
+
+    if out_file is not None:
+        if append:
+            print("Appending %d scores for goterm %s to %s" % (num_pred_to_write, goid, out_file))
+            out_type = 'a'
+        else:
+            print("Writing %d scores for goterm %s to %s" % (num_pred_to_write, goid, out_file))
+            out_type = 'w'
+
+        file_handle = open(out_file, out_type)
+    elif file_handle is None:
+        print("Warning: out_file and file_handle are None. Not writing scores to a file")
+        return 
+
+    # write the scores to a file, up to the specified number of nodes (num_pred_to_write)
+    file_handle.write(header)
+    for n in sorted(scores, key=scores.get, reverse=True)[:num_pred_to_write]:
+        file_handle.write("%s\t%s\t%0.4e\n" % (goid, n, scores[n]))
+    return
+

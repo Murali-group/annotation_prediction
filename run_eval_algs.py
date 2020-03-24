@@ -241,8 +241,7 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     # TODO add a 'test' option or something to be able to limit to a single term
     if 'only_functions_file' in dataset and dataset['only_functions_file'] != '':
         only_functions_file = "%s/%s" % (input_dir, dataset['only_functions_file'])
-    selected_terms = alg_utils.select_goterms(
-            only_functions_file=only_functions_file, goterms=kwargs['goterm']) 
+    selected_terms = alg_utils.select_goterms(only_functions_file=only_functions_file) 
 
     # write/load the processed annotation matrix in a pos_neg_file version of the network folder
     # TODO this is hacky, but works for now
@@ -386,67 +385,12 @@ def run_algs(alg_runners, **kwargs):
             # TODO generate the output file paths in the runner object
             #out_file = run_obj.out_file
             utils.checkDir(os.path.dirname(run_obj.out_file)) 
-            write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
+            alg_utils.write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
                          run_obj.out_file, num_pred_to_write=num_pred_to_write)
 
     eval_loso.write_stats_file(runners_to_run, params_results)
     print(params_results)
     print("Finished")
-
-
-def write_output(goid_scores, goids, prots, out_file, num_pred_to_write=10):
-    """
-    *num_pred_to_write* can either be an integer, or a dictionary with a number of predictions to write for each term
-    """
-    # now write the scores to a file
-    if isinstance(num_pred_to_write, dict):
-        #print("\twriting top %d*num_pred scores to %s" % (kwargs['factor_pred_to_write'], out_file))
-        print("\twriting top <factor>*num_pred scores to %s" % (out_file))
-    else:
-        print("\twriting top %d scores to %s" % (num_pred_to_write, out_file))
-
-    with open(out_file, 'w') as out:
-        out.write("#goterm\tprot\tscore\n")
-        for i in range(goid_scores.shape[0]):
-            scores = goid_scores[i].toarray().flatten()
-            # convert the nodes back to their names, and make a dictionary out of the scores
-            scores = {prots[j]:s for j, s in enumerate(scores)}
-            num_to_write = num_pred_to_write
-            if isinstance(num_to_write, dict):
-                num_to_write = num_pred_to_write[goids[i]]
-            write_scores_to_file(scores, goid=goids[i], file_handle=out,
-                    num_pred_to_write=int(num_to_write))
-
-
-def write_scores_to_file(scores, goid='', out_file=None, file_handle=None,
-        num_pred_to_write=100, header="", append=True):
-    """
-    *scores*: dictionary of node_name: score
-    *num_pred_to_write*: number of predictions (node scores) to write to the file 
-        (sorted by score in decreasing order). If -1, all will be written
-    """
-
-    if num_pred_to_write == -1:
-        num_pred_to_write = len(scores) 
-
-    if out_file is not None:
-        if append:
-            print("Appending %d scores for goterm %s to %s" % (num_pred_to_write, goid, out_file))
-            out_type = 'a'
-        else:
-            print("Writing %d scores for goterm %s to %s" % (num_pred_to_write, goid, out_file))
-            out_type = 'w'
-
-        file_handle = open(out_file, out_type)
-    elif file_handle is None:
-        print("Warning: out_file and file_handle are None. Not writing scores to a file")
-        return 
-
-    # write the scores to a file, up to the specified number of nodes (num_pred_to_write)
-    file_handle.write(header)
-    for n in sorted(scores, key=scores.get, reverse=True)[:num_pred_to_write]:
-        file_handle.write("%s\t%s\t%0.6e\n" % (goid, n, scores[n]))
-    return
 
 
 if __name__ == "__main__":
