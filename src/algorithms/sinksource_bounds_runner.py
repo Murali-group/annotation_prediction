@@ -13,43 +13,21 @@ import fcntl
 def setupInputs(run_obj):
     # setup is the same as for fastsinksource
     fss_runner.setupInputs(run_obj)
-#    # may need to make sure the inputs match
-#    ## if there are more annotations than nodes in the network, then trim the extra pos/neg nodes
-#    #num_nodes = self.P.shape[0] if self.weight_gmw is False else self.normalized_nets[0].shape[0]
-#    #if len(self.prots) > num_nodes: 
-#    #    positives = positives[np.where(positives < num_nodes)]
-#    #    negatives = negatives[np.where(negatives < num_nodes)]
-#
-#    # extract the variables out of the annotation object
-#    run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
-#    run_obj.goids = run_obj.ann_obj.goids
-#
-#    if run_obj.net_obj.weight_swsn:
-#        # TODO if the net obj already has the W_SWSN object, then use that instead
-#        W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
-#        run_obj.P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=run_obj.params.get('lambda', None))
-#        run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
-#    elif run_obj.net_obj.weight_gmw:
-#        # this will be handled on a GO term by GO term basis
-#        run_obj.P = None
-#    else:
-#        run_obj.P = alg_utils.normalizeGraphEdgeWeights(run_obj.net_obj.W, ss_lambda=run_obj.params.get('lambda', None))
 
     return
 
 
 # setup the params_str used in the output file
 def setup_params_str(
-        weight_str, params, name="fastsinksource",
-        rank_all=False, rank_pos_neg=None):
+        weight_str, params, name="fastsinksource"):
     # TODO update with additional parameters
     # ss_lambda affects the network that all these methods use
     ss_lambda = params.get('lambda', 0)
-    params_str = "%s-l%s" % (weight_str, ss_lambda)
-    if name.lower() not in ["local", "localplus"]:
-        a, maxi = params['alpha'], params['max_iters']
-        params_str += "-a%s-maxi%s" % ( 
-            str_(a), str_(maxi))
+    a, maxi = params['alpha'], params['max_iters']
+    rank_pos_neg = params.get('rank_pos_neg')
+    params_str = "%s-l%s-a%s-maxi%s" % (
+        weight_str, ss_lambda, str_(a), str_(maxi))
+    params_str += "-rank-pos-neg" if rank_pos_neg else ""
 
     return params_str
 
@@ -73,9 +51,9 @@ def setupOutputs(run_obj, taxon=None, **kwargs):
         fcntl.flock(out, fcntl.LOCK_EX)
         if append is False:
             if taxon is not None:
-                out.write("#goterm\ttaxon\tnum_pos\titer\tkendalltau\tnum_unranked\tmax_unr_stretch\tmax_d\tUB\tfmax\tavgp\tauprc\n")
+                out.write("#goterm\ttaxon\tnum_pos\titer\tkendalltau\tnum_unranked\tmax_unr_stretch\tmax_d\tUB\n")
             else:
-                out.write("#goterm\tnum_pos\titer\tkendalltau\tnum_unranked\tmax_unr_stretch\tmax_d\tUB\tfmax\tavgp\tauprc\n")
+                out.write("#goterm\tnum_pos\titer\tkendalltau\tnum_unranked\tmax_unr_stretch\tmax_d\tUB\n")
         for goid, rank_stats in run_obj.goid_rank_stats.items():
             if taxon is not None:
                 goid += "\t"+taxon
@@ -107,7 +85,7 @@ def run(run_obj):
         positives = (y > 0).nonzero()[1]
         negatives = (y < 0).nonzero()[1]
         # if this method uses positive examples only, then remove the negative examples
-        if alg in ["fastsinksourceplus", "sinksourceplus", "localplus"]:
+        if alg in ["sinksourceplus_bounds"]:
             negatives = None
 
         if run_obj.net_obj.weight_gmw is True:
@@ -119,12 +97,12 @@ def run(run_obj):
 
         a, max_iters = params['alpha'], params['max_iters']
         compare_ranks = params['compare_ranks']
-        # rank_all is a T/F option, but 'rank_pos_neg' will be the test/left-out ann matrix 
+        # 'rank_pos_neg' will be the test/left-out ann matrix 
         # from which we can get the left-out pos/neg for this term
-        rank_all, rank_pos_neg = params['rank_all'], params['rank_pos_neg']
+        rank_pos_neg = params['rank_pos_neg']
         if sp.issparse(rank_pos_neg):
             pos, neg = alg_utils.get_goid_pos_neg(rank_pos_neg, idx)
-            rank_pos_neg = (set(pos), set(neg))
+            pos_neg_nodes = set(pos) | set(neg)
         elif rank_pos_neg is True:
             print("ERROR: rank_pos_neg must be the test_ann_mat")
             sys.exit()
@@ -132,7 +110,7 @@ def run(run_obj):
         # now actually run the algorithm
         ss_obj = ss_bounds.SinkSourceBounds(
             P, positives, negatives=negatives, max_iters=max_iters,
-            a=a, rank_all=rank_all, rank_pos_neg=rank_pos_neg,
+            a=a, nodes_to_rank=pos_neg_nodes,
             verbose=run_obj.kwargs.get('verbose', False))
 
         scores_arr = ss_obj.runSinkSourceBounds()
@@ -143,14 +121,13 @@ def run(run_obj):
                     "(%0.4f sec) for %s" % (process_time, goid))
 
         if compare_ranks:
-            # compare how long it takes for the ranks to match the previous run
+            # compute the kendall's tau at each iteration compared to the final ranking from the previous run.
             tqdm.write("\tRepeating the run, but comparing the ranks from the previous run at each iteration")
             # keep only the nodes with a non-zero score
             scores = {n: s for n, s in enumerate(scores_arr) if s > 0} 
             # ranks is a list containing the ranked order of nodes.
             # The node with the highest score is first, the lowest is last
             if rank_pos_neg is not None:
-                pos_neg_nodes = rank_pos_neg[0] | rank_pos_neg[1]
                 ranks = [n for n in sorted(set(scores.keys()) & pos_neg_nodes, key=scores.get, reverse=True)]
             else:
                 ranks = [n for n in sorted(scores, key=scores.get, reverse=True)]
@@ -159,27 +136,21 @@ def run(run_obj):
             #ranks = ranks[:k] if self.rank_topk is True else ranks
             ss_obj = ss_bounds.SinkSourceBounds(
                 P, positives, negatives=negatives, max_iters=max_iters,
-                a=a, rank_all=rank_all, rank_pos_neg=rank_pos_neg, ranks_to_compare=ranks,
+                a=a, nodes_to_rank=pos_neg_nodes, ranks_to_compare=ranks,
                 verbose=run_obj.kwargs.get('verbose', False))
             ss_obj.runSinkSourceBounds()
 
-            rank_stats = ["%d\t%d\t%0.4e\t%d\t%d\t%0.2e\t%0.2e\t%0.4f\t%0.4f\t%0.4f" % (
+            # leave out precision and recall
+            #rank_stats = ["%d\t%d\t%0.4e\t%d\t%d\t%0.2e\t%0.2e\t%0.4f\t%0.4f\t%0.4f" % (
+            rank_stats = ["%d\t%d\t%0.4e\t%d\t%d\t%0.2e\t%0.2e" % (
                 len(positives), i+1, ss_obj.kendalltau_list[i], ss_obj.num_unranked_list[i],
                 ss_obj.max_unranked_stretch_list[i], ss_obj.max_d_list[i], ss_obj.UB_list[i],
-                ss_obj.eval_stats_list[i][0], ss_obj.eval_stats_list[i][1],
-                ss_obj.eval_stats_list[i][2])
+                #ss_obj.eval_stats_list[i][0], ss_obj.eval_stats_list[i][1],
+                #ss_obj.eval_stats_list[i][2]
+                )
                                 for i in range(ss_obj.num_iters)]
             goid_rank_stats[goid] = rank_stats
 
-            #rank_fh.write(''.join("%s%s\t%d\t%d\t%0.6f\t%d\t%d\t%0.4e\t%0.4e\t%0.4f\t%0.4f\t%0.4f\t%0.4f\n" % (
-            #    goid, "\t%s"%self.taxon if self.taxon is not None else "", len(positives), i+1, ss_squeeze.kendalltau_list[i],
-            #    ss_squeeze.num_unranked_list[i], ss_squeeze.max_unranked_stretch_list[i], ss_squeeze.max_d_list[i], ss_squeeze.UB_list[i],
-            #    ss_squeeze.eval_stats_list[i][0], ss_squeeze.eval_stats_list[i][1], ss_squeeze.eval_stats_list[i][2], ss_squeeze.eval_stats_list[i][3])
-            #                    for i in range(ss_squeeze.num_iters)))
-
-        ## if they're different dimensions, then set the others to zeros 
-        #if len(scores_arr) < goid_scores.shape[1]:
-        #    scores_arr = np.append(scores_arr, [0]*(goid_scores.shape[1] - len(scores_arr)))
         # limit the scores to the target nodes
         if len(run_obj.target_prots) != len(scores_arr):
             mask = np.ones(len(scores_arr), np.bool)
