@@ -38,16 +38,15 @@ import run_eval_algs
 import src.algorithms.runner as runner
 import src.utils.file_utils as utils
 import src.evaluate.eval_utils as eval_utils
-import src.go_term_prediction_examples.go_term_prediction_examples as go_examples
+import src.evaluate.cross_validation as cv
 
 
 ALG_NAMES = {
-    'localplus': 'Local', 'local': 'Local-',
+    'localplus': 'Local+', 'local': 'Local',
     'sinksource': 'SinkSource', 'sinksourceplus': 'SinkSource+',
     'sinksource_bounds': 'SinkSource_Bounds',
     'fastsinksource': 'FSS', 'fastsinksourceplus': 'FSS+',
     'genemania': 'GeneMANIA',  
-    'birgrank': 'BirgRank', 'aptrank': 'AptRank OneWay',
     }
 
 measure_map = {'fmax': r'F$_{\mathrm{max}}$'}
@@ -57,12 +56,10 @@ param_map = {'alpha': r'$\rm \alpha$'}
 # tried to be fancy :P
 # colors: https://coolors.co/ef6e4a-0ec9aa-7c9299-5d88d3-96bd33
 #my_palette = ["#EF6E4A", "#0EC9AA", "#7C9299", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
-# changed birgrank (third) to purple
 my_palette = ["#EF6E4A", "#0EC9AA", "#8e71d0", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
 alg_colors = {
     'fastsinksource': my_palette[0],
     'genemania': my_palette[1],
-    'birgrank': my_palette[2],
     'localplus': my_palette[3],
     'sinksource': my_palette[4],
     }
@@ -71,7 +68,6 @@ my_shapes = ['o', 's', 'P', '^', 'x', '*', '+', 'v', 'x',]
 alg_shapes = {
     'fastsinksource': 'o',
     'genemania': 's',
-    'birgrank': 'P',
     'localplus': '^',
     'sinksource': 'x',
     }
@@ -98,28 +94,33 @@ def setup_opts():
                      help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
     group.add_argument('--goterm', '-G', type=str, action="append",
                      help="Specify the GO terms to use (should be in GO:00XX format)")
-    group.add_argument('--exp-type', type=str, default='cv-5folds',
-                     help='Type of experiment (e.g., cv-5fold, loso, temporal-holdout). Default: cv-5folds')
-    group.add_argument('--num-reps', type=int, default=1,
-                     help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
-    group.add_argument('--cv-seed', type=int,
-                     help="Seed used when running CV")
+    #group.add_argument('--exp-type', type=str, default='cv-5folds',
+    #                 help='Type of experiment (e.g., cv-5fold, loso, temporal-holdout). Default: cv-5folds')
     group.add_argument('--only-terms-file', type=str, 
                      help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
     group.add_argument('--only-terms-name', type=str, default='',
                      help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
-    group.add_argument('--most-specific-terms', action='store_true', default=False,
-                     help="If 'loso' is specified for --exp-type, then for each species, " + \
-                          "show results for only the most specific terms")
     group.add_argument('--postfix', type=str, 
                      help="Postfix to add to the end of the files")
+
+    group = parser.add_argument_group("Evaluation options")
+    group.add_argument('--cross-validation-folds', '-C', type=int,
+                     help="Get results from cross validation using the specified # folds")
+    group.add_argument('--num-reps', type=int, default=1,
+                     help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
+    group.add_argument('--cv-seed', type=int,
+                     help="Seed used when running CV")
+    group.add_argument('--sample-neg-examples-factor', type=float, 
+                     help="Factor of # positives used to sample a negative examples")
+    group.add_argument('--loso', action='store_true',
+                     help="Get results from leave-one-species-out validation")
 
     # plotting parameters
     group = parser.add_argument_group('Plotting Options')
     group.add_argument('--measure', action="append",
                      help="Evaluation measure to use. May specify multiple. Options: 'fmax', 'avgp', 'auprc', 'auroc'. Default: 'fmax'")
     group.add_argument('--boxplot', action='store_true', default=False,
-                     help="Compare all runners in the config file using a boxplot")
+                     help="Compare all terms for all runners in the config file using a boxplot")
     group.add_argument('--line', action='store_true', default=False,
                      help="Compare all runners on all datasets in the config file using a lineplot")
     group.add_argument('--ci', type=float,
@@ -194,8 +195,6 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     kwargs['out_pref'] = out_pref
     if kwargs['out_pref'] is not None:
         kwargs['out_pref'] += kwargs.get('plot_postfix', '') 
-    if kwargs.get('most_specific_terms') and not kwargs.get('only_terms_name'):
-        kwargs['only_terms_name'] = "most specific"
     print(kwargs)
 
     # plot prec-rec separately from everything else
@@ -226,7 +225,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
         if kwargs.get('only_terms') is not None:
             df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
         num_terms = df_all['#term'].nunique()
-        if kwargs['exp_type'] == "loso":
+        if kwargs.get('loso'):
             sp_taxon_pairs = df_all['#taxon'].astype(str) + df_all['#term']
             num_terms = sp_taxon_pairs.nunique()
             #num_terms = df_all.groupby(['#taxon', '#term']).size()
@@ -240,10 +239,16 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             title = kwargs['title']
         else:
             title = '-'.join(df_all['plot_exp_name'].unique())
-        if not kwargs.get('for_paper'):
+        if kwargs.get('cross_validation_folds'):
+            title += " \n%s%s%s" % (
+                " neg-factor=%s;"%kwargs['sample_neg_examples_factor'] if kwargs.get('sample_neg_examples_factor') else '',
+                " seed=%s;"%kwargs['cv_seed'] if kwargs.get('cv_seed') else "",
+                " # reps=%s;"%kwargs['num_reps'] if kwargs.get('num_reps',1) > 1 else "",
+            )
+        if not kwargs.get('for_paper') and num_terms > 1:
             title += " \n %d%s %s" % (
                     num_terms, ' %s'%kwargs.get('only_terms_name', ''),
-                    "sp-term pairs" if kwargs['exp_type'] == 'loso' else 'terms')
+                    "sp-term pairs" if kwargs.get('loso') else 'terms')
         kwargs['title'] = title
         kwargs['alg_params'] = alg_settings
         kwargs['algs'] = get_algs_to_run(alg_settings, **kwargs)
@@ -632,7 +637,7 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
 
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    if kwargs['exp_type'] == "loso":
+    if kwargs.get('loso'):
         df['taxon-term'] = df['#taxon'].map(str) + '-' + df['#term']
         index_col = 'taxon-term'
     else:
@@ -817,80 +822,41 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
     df_all = pd.DataFrame()
     algs = get_algs_to_run(alg_settings, **kwargs)
     for dataset in input_settings['datasets']:
-        if kwargs.get('most_specific_terms'):
-            # load the ontology
-            obo_file = "%s/%s" % (input_settings['input_dir'], dataset['obo_file'])
-            go_dags = go_examples.parse_obo_file_and_build_dags(obo_file)
         for alg in algs:
             if alg not in alg_settings:
                 print("%s not found in config file. Skipping" % (alg))
                 continue
             alg_params = alg_settings[alg]
-            curr_seed = kwargs.get('cv_seed')
-            if 'cv-' in kwargs['exp_type']:
+            if kwargs.get('cross_validation_folds'):
+                folds = kwargs.get('cross_validation_folds')
+                curr_seed = kwargs.get('cv_seed')
+                neg_factor = kwargs.get('sample_neg_examples_factor')
                 for rep in range(1,kwargs.get('num_reps',1)+1):
                     if curr_seed is not None:
                         curr_seed += rep-1
-                    curr_exp_type = "%s-rep%s%s" % (kwargs['exp_type'], rep, 
-                            "-seed%s" % (curr_seed) if curr_seed is not None else "")
+                    eval_type = cv.get_output_prefix(folds, rep, neg_factor, curr_seed)
                     df = load_alg_results(
                         dataset, alg, alg_params, prec_rec_str=prec_rec_str,
-                        results_dir=output_settings['output_dir'], **kwargs,  #exp_type=curr_exp_type,
+                        results_dir=output_settings['output_dir'],
+                        eval_type=eval_type, **kwargs,
                         #only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
                     )
                     add_dataset_settings(dataset, df) 
                     df['rep'] = rep
                     df_all = pd.concat([df_all, df])
             else:
+                eval_type = "" 
+                if kwargs.get('loso'):
+                    eval_type = 'loso'
                 df = load_alg_results(
                     dataset, alg, alg_params, prec_rec_str=prec_rec_str, 
-                    results_dir=output_settings['output_dir'], **kwargs,  #exp_type=kwargs['exp_type'],
+                    results_dir=output_settings['output_dir'],
+                    eval_type=eval_type, **kwargs,
                     #only_terms=kwargs.get('only_terms'), postfix=kwargs.get('postfix',''),
                 )
-                if kwargs.get('most_specific_terms') and len(df) > 0:
-                    df = get_most_specific_sp_term_pairs(
-                            df, go_dags, **kwargs)
-                    print("MAD: %s" % (mad(df['fmax'].values)))
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
     return df_all
-
-
-def get_most_specific_sp_term_pairs(df, go_dags, **kwargs):
-    # figure out which DAG this is
-    for h, dag in go_dags.items():
-        t = df['#term'].values[0]
-        if dag.has_node(t):
-            break
-    print("\tusing %s hierarchy" % (h))
-
-    new_df = pd.DataFrame()
-    # for each species, limit to the terms which have no descendants
-    for taxon, df_t in df.groupby('#taxon'):
-        terms = get_most_specific_terms(df_t['#term'].values, dag)
-        df_t = df_t[df_t['#term'].isin(terms)]
-        new_df = pd.concat([new_df, df_t])
-    print("\t%d sp-term pairs limited to %d most specific sp-term pairs" % (
-        (df['#taxon'].astype(str) + df['#term']).nunique(), (new_df['#taxon'].astype(str) + new_df['#term']).nunique()))
-    #print(new_df['#taxon'].nunique())
-    #print(new_df.head())
-    #sys.exit()
-
-    return new_df
-
-
-# given the set of annotations for a protein and the GO or HPO DAG as a networkx graph, keep only the most specific terms
-def get_most_specific_terms(terms, dag):
-    ancestor_terms = set()
-    for t in set(terms):
-        if t in ancestor_terms:
-            continue
-        # get the ancestors, which are technically descendants in the DAG
-        ancestors = set(nx.descendants(dag, t))
-        ancestor_terms |= ancestors
-    # remove the ancestors to get the specific terms
-    specific_terms = set(terms) - ancestor_terms
-    return specific_terms
 
 
 def add_dataset_settings(dataset, df):
@@ -909,13 +875,13 @@ def add_dataset_settings(dataset, df):
 
 def load_alg_results(
         dataset, alg, alg_params, prec_rec_str="", 
-        results_dir='outputs', exp_type='cv-5folds', 
+        results_dir='outputs', eval_type="cv-5folds",
         only_terms=None, postfix='', **kwargs):
     """
     For a given dataset and algorithm, build the file path and load the results
     *prec_rec_str*: postfix to change file name. Usually 'prec-rec' if loading precision recal values
     *results_dir*: the base output directory
-    *exp_type*: The string specifying the evaluation type. For example: 'cv-5folds' or 'th' for temporal holdout
+    *eval_type*: The string specifying the evaluation type. For example: 'cv-5folds' or 'th' for temporal holdout
     *terms*: a set of terms for which to limit the output
     """
     alg_name = alg
@@ -936,7 +902,7 @@ def load_alg_results(
     for param_combo in combos:
         # first get the parameter string for this runner
         params_str = runner.get_runner_params_str(alg, dataset, param_combo)
-        cv_file = "%s/%s/%s%s%s%s.txt" % (out_dir, alg, exp_type, params_str, postfix, prec_rec_str)
+        cv_file = "%s/%s/%s%s%s%s.txt" % (out_dir, alg, eval_type, params_str, postfix, prec_rec_str)
         if not os.path.isfile(cv_file):
             print("\tnot found %s - skipping" % (cv_file))
             continue
