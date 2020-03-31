@@ -1,50 +1,29 @@
-import tqdm
+
 from tqdm import tqdm, trange
-#import scikit
-from rpy2.robjects import *
-import subprocess
-from rpy2 import robjects as ro
+#from rpy2.robjects import *
+#from rpy2 import robjects as ro
 import numpy as np
 from scipy import sparse
-import sklearn
-from sklearn import metrics
-from scipy import sparse
-import scipy
-import seaborn as sns
 import src.algorithms.alg_utils as alg_utils
-import matplotlib.pyplot as plt
+import src.algorithms.logistic_regression_runner as logReg_runner
+import src.algorithms.svm as svm
 import time
-import src.algorithms.logistic_regression as logReg
+
 
 def setupInputs(run_obj):
-    run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
-    run_obj.terms = run_obj.ann_obj.terms
-    run_obj.prots = run_obj.ann_obj.prots
-    run_obj.termidx = run_obj.ann_obj.term2idx
-    run_obj.protidx = run_obj.ann_obj.node2idx
+    # use the same steps as are used for logistic regression
+    logReg_runner.setupInputs(run_obj) 
+    return 
 
-    if run_obj.net_obj.weight_swsn:
-        W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
-        run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
-    else:
-        W = run_obj.net_obj.W
-    '''
-    # if influence matrix is to be used, then obtain the influence matrix of W
-    if run_obj.net_obj.influence_mat:
-        run_obj.P = alg_utils.influenceMatrix(W, ss_lambda=run_obj.params.get('lambda', None))
-    else:
-    '''
-    run_obj.P = W
-
-
-    return
 
 def setup_params_str(weight_str, params, name):
-    iters = params['num_iter']
+    iters = params['max_iters']
     return "{}-{}-maxi{}".format(weight_str, name, str_(iters))
+
 
 def setupOutputs(run_obj):
     return
+
 
 def run(run_obj):
     """
@@ -56,11 +35,12 @@ def run(run_obj):
 
     # get the labels matrix and transpose it to have label names as columns
     ann_mat = run_obj.ann_matrix
-    max_iter = params['num_iter']
+    max_iters = params['max_iters']
+    print("Running %s with these parameters: %s" % (alg, params))
     # see if train and test annotation matrices from the cross validation pipeline exist
         # if not, set train and test to the original annotation matrix itself
     if run_obj.train_mat is not None and run_obj.test_mat is not None:
-        print("Performing cross validation")
+        #print("Performing cross validation")
         run_obj.cv = True
         train_mat = run_obj.train_mat
         test_mat = run_obj.test_mat
@@ -74,6 +54,15 @@ def run(run_obj):
     
     for term in tqdm(run_obj.terms_to_run):    
         idx = run_obj.termidx[term]
+
+        if run_obj.net_obj.weight_gmw is True:
+            # get the row corresponding to the current terms annotations 
+            y = run_obj.ann_matrix[idx,:]
+            start_time = time.process_time()
+            # weight the network for each term individually
+            W,_,_ = run_obj.net_obj.weight_GMW(y.toarray()[0], term)
+            P = alg_utils.normalizeGraphEdgeWeights(W, ss_lambda=params.get('lambda', None))
+            params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
         
         # compute the train gene indices of the annotations for the given label
         train_pos, train_neg = alg_utils.get_term_pos_neg(train_mat,idx)
@@ -104,10 +93,10 @@ def run(run_obj):
         lab = y_train[:,idx].toarray().flatten()
 
         # now train the model on the constructed training data and the column of labels
-        clf = logReg.training(X_train, lab, max_iter)
+        clf = svm.training(X_train, lab, max_iters)
         
         # make predictions on the constructed training set
-        predict = logReg.testing(clf, X_test)
+        predict = svm.testing(clf, X_test)
         predict = predict.tolist()
         
         # get the current scores for the given label l
@@ -120,6 +109,7 @@ def run(run_obj):
 
     run_obj.term_scores = scores
     run_obj.params_results = params_results
+
 
 def str_(s):
     return str(s).replace('.','_')

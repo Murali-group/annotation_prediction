@@ -6,6 +6,8 @@ import src.algorithms.alg_utils
 import src.algorithms.fastsinksource_runner as fastsinksource
 import src.algorithms.sinksource_bounds_runner as ss_bounds
 import src.algorithms.genemania_runner as genemania
+import src.algorithms.svm_runner as svm
+import src.algorithms.logistic_regression_runner as logistic_regression
 #import src.algorithms.sinksource_bounds
 import numpy as np
 from scipy import sparse as sp
@@ -22,6 +24,8 @@ LibMapper = {
     'localplus': fastsinksource,
     'genemania': genemania,
     'genemaniaplus': genemania,
+    'svm': svm,
+    'logistic_regression': logistic_regression,
 }
 
 
