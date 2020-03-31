@@ -16,7 +16,7 @@ except ImportError:
 
 def run_cv_all_terms(
         alg_runners, ann_obj, folds=5, num_reps=1, 
-        cv_seed=None, **kwargs):
+        cv_seed=None, sample_neg_examples_factor=None, **kwargs):
     """
     Split the positives and negatives into folds across all terms
     and then run the algorithms on those folds.
@@ -25,6 +25,8 @@ def run_cv_all_terms(
     An output file will be written for each repeat
     *cv_seed*: Seed to use for the random number generator when splitting the annotations into folds
         If *num_reps* > 1, the seed will be incremented by 1 each time
+    *sample_neg_examples_factor*: If specified, sample negative examples randomly without replacement 
+        from the protein universe (ann_obj.prots) equal to <sample_neg_examples_factor> * # positives for a given term
     """
     ann_matrix = ann_obj.ann_matrix
     terms, prots = ann_obj.terms, ann_obj.prots
@@ -49,16 +51,16 @@ def run_cv_all_terms(
             if curr_seed is not None:
                 # add the current repitition number to the seed
                 curr_seed += rep-1
+            out_pref = get_output_prefix(folds, rep, sample_neg_examples_factor, curr_seed)
             for run_obj in alg_runners:
-                out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
-                    run_obj.out_dir, folds, rep,
-                    "-seed%s"%curr_seed if curr_seed is not None else "", run_obj.params_str)
+                out_file = "%s/%s%s.txt" % (run_obj.out_dir, out_pref, run_obj.params_str)
                 if os.path.isfile(out_file):
                     print("%s already exists. Use --forcealg to overwite" % (out_file))
                 else:
                     curr_runners_to_run.append(run_obj)
             runners_to_run[rep] = curr_runners_to_run
 
+    orig_ann_obj = ann_obj
     # repeat the CV process the specified number of times
     for rep in range(1,num_reps+1):
         if len(runners_to_run[rep]) == 0:
@@ -67,6 +69,11 @@ def run_cv_all_terms(
         if curr_seed is not None:
             # add the current repitition number to the seed
             curr_seed += rep-1
+        # generate negative examples if specified 
+        if sample_neg_examples_factor is not None:
+            new_ann_matrix = eval_utils.sample_neg_examples(
+                orig_ann_obj, sample_neg_examples_factor=sample_neg_examples_factor)
+            ann_obj.ann_matrix = new_ann_matrix
         # split the annotation matrix into training and testing matrices K times
         ann_matrix_folds = split_cv_all_terms(ann_obj, folds=folds, seed=curr_seed, **kwargs)
 
@@ -103,9 +110,8 @@ def run_cv_all_terms(
             run_obj.term_scores = combined_fold_scores 
 
             # now evaluate the results and write to a file
-            out_file = "%s/cv-%dfolds-rep%d%s%s.txt" % (
-                run_obj.out_dir, folds, rep,
-                "-seed%s"%curr_seed if curr_seed is not None else "", run_obj.params_str)
+            out_pref = get_output_prefix(folds, rep, sample_neg_examples_factor, curr_seed)
+            out_file = "%s/%s%s.txt" % (run_obj.out_dir, out_pref, run_obj.params_str)
             utils.checkDir(os.path.dirname(out_file)) 
             eval_utils.evaluate_ground_truth(
                 run_obj, ann_obj, out_file,
@@ -114,6 +120,27 @@ def run_cv_all_terms(
 
     print("Finished running cross-validation")
     return
+
+
+def get_output_prefix(
+        folds, rep, sample_neg_examples_factor=None,
+        curr_seed=None):
+    """
+    Get the prefix of the output cross-validation results file
+    *folds*: number of cross-validation folds
+    *rep*: current repitition number
+    *sample_neg_examples_factor*: Factor of # positives used to sample a negative examples. 
+    *curr_seed*: Seed to use for the random number generator when splitting the annotations into folds
+    """
+    if sample_neg_examples_factor is not None:
+        # if an integer is passed in, then make sure the string doesn't include the ".0" at the end of the number
+        if int(sample_neg_examples_factor) == sample_neg_examples_factor:
+            sample_neg_examples_factor = int(sample_neg_examples_factor) 
+    out_pref = "cv-%dfolds-rep%d%s%s" % (
+        folds, rep,
+        "-nf%s"%sample_neg_examples_factor if sample_neg_examples_factor is not None else "",
+        "-seed%s"%curr_seed if curr_seed is not None else "")
+    return out_pref
 
 
 def split_cv_all_terms(ann_obj, folds=5, seed=None, **kwargs):
@@ -161,3 +188,4 @@ def split_cv_all_terms(ann_obj, folds=5, seed=None, **kwargs):
                 mat[i] = pos_neg_arr
 
     return ann_matrix_folds
+

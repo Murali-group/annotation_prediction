@@ -266,3 +266,44 @@ def compute_early_prec(prec, rec, pos_neg_stats, recall_vals, num_pos):
                     early_prec_values.append(p)
                     break
     return early_prec_values
+
+
+def sample_neg_examples(ann_obj, sample_neg_examples_factor=10):
+    """
+    For each term, sample negative examples from all prots (minus the pos examples)
+    """
+    print("Sampling negative examples using a factor of %d * # pos per term from the universe of %s prots" % (
+        sample_neg_examples_factor, len(ann_obj.prots)))
+    pos_mat = (ann_obj.ann_matrix > 0).astype(int)
+    new_ann_mat = pos_mat.copy()
+    # the universe is the indices of the prots 
+    prot_universe = set(np.arange(len(ann_obj.prots)))
+    for idx, term in enumerate(ann_obj.terms):
+        pos_examples = np.where(pos_mat[idx].toarray().flatten() > 0)[0]
+        neg_examples = sample_term_neg_examples(set(pos_examples), prot_universe, sample_neg_examples_factor)
+        # make sure they are treated as indexes
+        neg_examples = neg_examples.astype(int)
+        neg_vec = np.zeros(pos_mat.shape[1])
+        neg_vec[neg_examples] = -1
+        new_ann_mat[idx] += neg_vec
+    return new_ann_mat
+
+
+def sample_term_neg_examples(pos_examples, prot_universe, sample_neg_examples_factor):
+    """
+    *pos_examples*: indices of prots
+    """
+    neg_factor = sample_neg_examples_factor * len(pos_examples) 
+    non_pos_universe = prot_universe - pos_examples
+    #print("Sampling %s (%s*%s) negative examples from the universe of %s non-pos prots" % (
+    #    neg_sample, sample_neg_examples_factor, len(pos_examples), len(non_pos_universe)))
+    if neg_factor > len(non_pos_universe):
+        print("Sampling %s (%s*%s) negative examples from the universe of %s non-pos prots" % (
+            neg_factor, sample_neg_examples_factor, len(pos_examples), len(non_pos_universe)))
+        print("ERROR: cannot sample more negative examples than specified by non_pos_universe")
+
+    # now perform the sampling
+    non_pos_universe = np.asarray(list(non_pos_universe), dtype=str)
+    # sample without replacement
+    neg_examples = np.random.choice(non_pos_universe, size=int(neg_factor), replace=False)
+    return neg_examples

@@ -48,7 +48,7 @@ def setup_opts():
             help="Specify the terms to use. Can use this option multiple times")
 
     # evaluation parameters
-    group = parser.add_argument_group('Evaluation options')
+    group = parser.add_argument_group("Evaluation options (can be set under 'eval_settings' in config file)")
     group.add_argument('--only-eval', action="store_true", default=False,
             help="Perform evaluation only (i.e., skip prediction mode)")
     group.add_argument('--cross-validation-folds', '-C', type=int,
@@ -58,6 +58,8 @@ def setup_opts():
     group.add_argument('--cv-seed', type=int, 
             help="Seed to use for the random number generator when splitting the annotations into folds. " + \
             "If --num-reps > 1, the seed will be incremented by 1 each time. Should only be used for testing purposes")
+    group.add_argument('--sample-neg-examples-factor', type=float, 
+            help="If specified, sample negative examples randomly without replacement from the protein universe equal to <sample_neg_examples_factor> * # positives")
     group.add_argument('--loso', action="store_true", default=False,
             help="Leave-One-Species-Out evaluation. For each species, leave out all of its annotations " +
             "and evaluate how well they can be recovered from the annotations of the other species. " +
