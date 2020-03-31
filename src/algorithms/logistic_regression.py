@@ -21,5 +21,5 @@ def training(P, labels, max_iter):
 
 def testing(clf, P):
     
-    predict = clf.decision_function(P)
+    predict = clf.predict_proba(P)[:,1]
     return predict
