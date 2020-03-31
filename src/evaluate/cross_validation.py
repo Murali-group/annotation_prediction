@@ -79,7 +79,7 @@ def run_cv_all_terms(
                 print("Fold %d" % (curr_fold+1))
     
                 # change the annotation matrix to the current fold
-                curr_ann_obj = setup.Sparse_Annotations(run_obj.ann_obj.dag_matrix, train_ann_mat, terms, prots)
+                curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, terms, prots)
                 # replace the ann_obj in the runner with the current fold's annotations  
                 run_obj.ann_obj = curr_ann_obj
                 run_obj.train_mat = train_ann_mat
