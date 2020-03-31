@@ -47,6 +47,8 @@ ALG_NAMES = {
     'sinksource_bounds': 'SinkSource_Bounds',
     'fastsinksource': 'FSS', 'fastsinksourceplus': 'FSS+',
     'genemania': 'GeneMANIA',  
+    'logistic_regression': 'LogReg',
+    'svm': 'SVM',
     }
 
 measure_map = {'fmax': r'F$_{\mathrm{max}}$'}
@@ -239,6 +241,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             title = kwargs['title']
         else:
             title = '-'.join(df_all['plot_exp_name'].unique())
+        # add the cross-validation settings to the plot
         if kwargs.get('cross_validation_folds'):
             title += " \n%s%s%s" % (
                 " neg-factor=%s;"%kwargs['sample_neg_examples_factor'] if kwargs.get('sample_neg_examples_factor') else '',
@@ -829,11 +832,11 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
             alg_params = alg_settings[alg]
             if kwargs.get('cross_validation_folds'):
                 folds = kwargs.get('cross_validation_folds')
-                curr_seed = kwargs.get('cv_seed')
+                cv_seed = kwargs.get('cv_seed')
                 neg_factor = kwargs.get('sample_neg_examples_factor')
                 for rep in range(1,kwargs.get('num_reps',1)+1):
-                    if curr_seed is not None:
-                        curr_seed += rep-1
+                    if cv_seed is not None:
+                        curr_seed = cv_seed + rep-1
                     eval_type = cv.get_output_prefix(folds, rep, neg_factor, curr_seed)
                     df = load_alg_results(
                         dataset, alg, alg_params, prec_rec_str=prec_rec_str,
