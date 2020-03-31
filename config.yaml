@@ -67,15 +67,33 @@ algs:
     # local has no parameters
     local:
         should_run: [False]
+    localplus:
+        should_run: [True]
+
+    genemania:
+        should_run: [False]
+        tol: [1e-05]
 
     fastsinksource:
         should_run: [True]
         alpha: [0.95]
         eps: [0]
         max_iters: [10]
+
+    fastsinksourceplus:
+        should_run: [True]
+        alpha: [0.99]
+        eps: [0]
+        max_iters: [10]
+        # this option isn't needed if alpha is < 1
+        #sinksourceplus_lambda: [0]
+
+    sinksource:
+        should_run: [True]
+        alpha: [1.0]
+        eps: [1e-4]
+        max_iters: [1000]
     
-    # sinksource-bounds
-    # TODO finish refactoring 
     sinksource-bounds:
         should_run: [False]
         rank_all: [False]
@@ -84,54 +102,21 @@ algs:
         alpha: [0.95]
         max_iters: [10]
 
-    # genemania
-    genemania:
-        should_run: [False]
-        tol: [1e-05]
+    logistic_regression:
+        should_run: [True]
+        max_iters: [100]
 
-    # birgrank
-    birgrank:
-        should_run: [False]
-        # path to the OBO file from the input_dir
-        obo_file: ["inputs/goa/2017_09/2017-09-26-go.obo"]
-        alpha: [.5]
-        lambda: [.5]
-        mu: [.5]
-        theta: [.5]
-        eps: [1e-04]
+    svm:
+        should_run: [True]
         max_iters: [1000]
-    
-    # aptrank
-    aptrank:
-        should_run: [False]
-        # path to the OBO file from the input_dir
-        obo_file: ["inputs/goa/2017_09/2017-09-26-go.obo"]
-        lambda: [.5]
-        k: [8]
-        s: [5]
-        t: [0.5]
-        diff_type: ["twoway"]
-
-    #fastsinksourceplus:
-    #    alpha: 0.9
-    #    eps: 0.0001
-    #    max_iters: 1000
-    #    # this option isn't needed if alpha is < 1
-    #    sinksourceplus_lambda: 0
 
 # Evaluation settings for CV or LOSO can be set here 
 # TODO these should probably be unique per dataset
 eval_settings:
 
     ### LOSO parameters
-    # Don't leave out annotations when running the algorithms.
-    # Can only be used in conjunction with a pos_neg_file_eval
-    keep_ann: False
     # Minimum number of annotations for each term in the "left-out" species to test. Default: 10
     num_test_cutoff: 10
-    # if --pos-neg-file-eval is given and --keep-ann is False, only evaluate terms that have at least 2% of annotations.
-    # Useful to speed-up processing for term-based algorithms
-    eval_goterms_with_left_out_only: False
     # Postfix to append to output file. Useful if running multiple in parallel. TODO figure out how to automatically combine the multiple output files
     postfix: ""
 
