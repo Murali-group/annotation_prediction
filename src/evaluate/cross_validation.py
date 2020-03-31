@@ -77,11 +77,13 @@ def run_cv_all_terms(
             for curr_fold, (train_ann_mat, test_ann_mat) in enumerate(ann_matrix_folds):
                 print("*  "*20)
                 print("Fold %d" % (curr_fold+1))
-
+    
                 # change the annotation matrix to the current fold
                 curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, terms, prots)
                 # replace the ann_obj in the runner with the current fold's annotations  
                 run_obj.ann_obj = curr_ann_obj
+                run_obj.train_mat = train_ann_mat
+                run_obj.test_mat = test_ann_mat
                 #alg_runners = run_eval_algs.setup_runners([alg], alg_settings, net_obj, curr_ann_obj, **kwargs)
                 # now setup the inputs for the runners
                 run_obj.setupInputs()
