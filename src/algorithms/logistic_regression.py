@@ -14,11 +14,9 @@ def training(P, labels, max_iter):
     *labels*: labels corresponding to the samples in the training set
     '''
     
-    
     logReg_clf =  LogisticRegression(max_iter=max_iter)
     logReg_clf.fit(P, labels)
     
-
     return logReg_clf
 
 def testing(clf, P):

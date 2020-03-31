@@ -21,11 +21,9 @@ def training(P, labels, max_iter):
     *labels*: labels corresponding to the samples in the training set
     '''
     
-    
     clf = LinearSVC(max_iter=max_iter)
     clf.fit(P, labels)
     
-
     return clf
 
 def testing(clf, P):
