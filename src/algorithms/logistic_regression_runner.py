@@ -66,8 +66,6 @@ def run(run_obj):
 
     # get the labels matrix and transpose it to have label names as columns
     ann_mat = run_obj.ann_matrix
-    labels = ann_mat.transpose()    # genes x hpo
-
     max_iter = params['num_iter']
     # see if train and test annotation matrices from the cross validation pipeline exist
         # if not, set train and test to the original annotation matrix itself
@@ -82,7 +80,7 @@ def run(run_obj):
         test_mat = ann_mat
     
     # stores the scores for all the terms
-    scores = sparse.lil_matrix(ann_mat.shape, dtype=np.float)        #   dim: hpo x genes
+    scores = sparse.lil_matrix(ann_mat.shape, dtype=np.float)        #   dim: term x genes
     
     for term in tqdm(run_obj.goids_to_run):    
         idx = run_obj.hpoidx[term]
@@ -132,7 +130,6 @@ def run(run_obj):
         curr_score[train_pos] = 1
         # add the scores produced by predicting on the current label of test set to a combined score matrix
         scores[idx] = curr_score
-
 
     run_obj.goid_scores = scores
     run_obj.params_results = params_results

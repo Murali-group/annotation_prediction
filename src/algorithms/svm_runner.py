@@ -6,18 +6,12 @@ import subprocess
 from rpy2 import robjects as ro
 import numpy as np
 from scipy import sparse
-import src.algorithms.fastsinksource_runner as fastsinksource
 import sklearn
-from sklearn import metrics
-from sklearn.svm import LinearSVC
-from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split
 from scipy import sparse
 import scipy
 import seaborn as sns
 import src.algorithms.alg_utils as alg_utils
 import matplotlib.pyplot as plt
-from sklearn.calibration import CalibratedClassifierCV
 import time
 import logging
 
@@ -61,9 +55,7 @@ def run(run_obj):
 
     # get the labels matrix and transpose it to have label names as columns
     ann_mat = run_obj.ann_matrix
-    labels = ann_mat.transpose()    # genes x hpo
 
-    
     if run_obj.train_mat is not None and run_obj.test_mat is not None:
         print("Performing Cross validation")
         run_obj.cv = True
@@ -75,9 +67,7 @@ def run(run_obj):
         test_mat = ann_mat
 
 
-    scores = sparse.lil_matrix(ann_mat.shape, dtype=np.float)        #   dim: hpo x genes
-    
-    combined_scores = sparse.lil_matrix(ann_mat.shape, dtype=np.float) # dim: hpo x genes terms
+    scores = sparse.lil_matrix(ann_mat.shape, dtype=np.float)        #   dim: terms x genes
     
     for term in tqdm(run_obj.goids_to_run):
         
@@ -125,7 +115,6 @@ def run(run_obj):
 
         # add the scores produced by predicting on the current label of test set to a combined score matrix
         scores[idx] = curr_score
-
 
     run_obj.goid_scores = scores
     run_obj.params_results = params_results
