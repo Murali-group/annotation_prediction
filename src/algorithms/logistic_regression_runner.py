@@ -77,7 +77,7 @@ def run(run_obj):
         idx = run_obj.termidx[term]
         
         # compute the train gene indices of the annotations for the given label
-        train_pos, train_neg = alg_utils.get_goid_pos_neg(train_mat,idx)
+        train_pos, train_neg = alg_utils.get_term_pos_neg(train_mat,idx)
         train_set = sorted(list(set(train_pos)|set(train_neg)))
         
         if len(train_pos)==0:
@@ -86,7 +86,7 @@ def run(run_obj):
         
         if run_obj.cv:
             # if cross validation, then obtain the test gene set on which classifier should be tested
-            test_pos, test_neg = alg_utils.get_goid_pos_neg(test_mat, idx)
+            test_pos, test_neg = alg_utils.get_term_pos_neg(test_mat, idx)
             test_set = set(test_pos) | set(test_neg)
             test_set = sorted(list(test_set))
         else:
