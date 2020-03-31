@@ -4,7 +4,7 @@ This is the main repository for the paper "Accurate and Efficient Gene Function 
 ## Installation
 These scripts requires Python 3 due to the use of obonet to build the GO DAG.
 
-Required packages: `networkx`, `numpy`, `scipy`, `pandas`, `sklearn`, `obonet`, `tqdm`
+Required packages: `networkx`, `numpy`, `scipy`, `pandas`, `sklearn`, `obonet`, `pyyaml`, `tqdm`
 
 To install the required packages:
 ```
