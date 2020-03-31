@@ -14,17 +14,16 @@ import seaborn as sns
 import src.algorithms.alg_utils as alg_utils
 import matplotlib.pyplot as plt
 import time
+from sklearn.linear_model import LogisticRegression
 import src.algorithms.logistic_regression as logReg
 
 def setupInputs(run_obj):
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
-    run_obj.goids = run_obj.ann_obj.goids
+    run_obj.terms = run_obj.ann_obj.terms
     run_obj.prots = run_obj.ann_obj.prots
-    run_obj.hpoidx = run_obj.ann_obj.goid2idx
+    run_obj.termidx = run_obj.ann_obj.term2idx
     run_obj.protidx = run_obj.ann_obj.node2idx
-    #run_obj.net_mat = run_obj.net_obj.W
 
-    # if swsn weighting is to be used, then obtain the current fold W
     if run_obj.net_obj.weight_swsn:
         W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
         run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
@@ -53,7 +52,6 @@ def run(run_obj):
     This script performs logistic regression by building a classifier for each term in the ontology
     """
     
-
     params_results = run_obj.params_results
     P, alg, params = run_obj.P, run_obj.name, run_obj.params
 
@@ -75,8 +73,8 @@ def run(run_obj):
     # stores the scores for all the terms
     scores = sparse.lil_matrix(ann_mat.shape, dtype=np.float)        #   dim: term x genes
     
-    for term in tqdm(run_obj.goids_to_run):    
-        idx = run_obj.hpoidx[term]
+    for term in tqdm(run_obj.terms_to_run):    
+        idx = run_obj.termidx[term]
         
         # compute the train gene indices of the annotations for the given label
         train_pos, train_neg = alg_utils.get_goid_pos_neg(train_mat,idx)
@@ -103,7 +101,6 @@ def run(run_obj):
         y_train = train_mat.transpose()[train_set, :]
         y_train = sparse.lil_matrix(y_train) 
         
-    
         # get the column of training data for the given label 
         lab = y_train[:,idx].toarray().flatten()
 
@@ -116,15 +113,13 @@ def run(run_obj):
         
         # get the current scores for the given label l
         curr_score = scores[idx].toarray().flatten()
-        
         # for the test indices of the current label, set the scores
         curr_score[test_set] = predict
-        
         curr_score[train_pos] = 1
         # add the scores produced by predicting on the current label of test set to a combined score matrix
         scores[idx] = curr_score
 
-    run_obj.goid_scores = scores
+    run_obj.term_scores = scores
     run_obj.params_results = params_results
 
 def str_(s):
