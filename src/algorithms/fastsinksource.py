@@ -57,11 +57,11 @@ def runFastSinkSource(
         max_iters=1000, eps=0.0001, a=0.8,
         tol=1e-5, solver=None, Milu=None, verbose=False):
     """
-    *P*: Network as a scipy sparse matrix. Should already be normalized
+    *P*: Network ags a scipy sparse matrix. Should already be normalized
     *positives*: numpy array of node ids to be used as positives
-    *negeatives*: numpy array of node ids to be used as negatives. 
-        If not given, will be run as SinkSourcePlus. 
-        For SinkSourcePlus, if the lambda parameter is desired, it should already have been included in the graph normalization process. 
+    *negatives*: numpy array of node ids to be used as negatives. 
+        If not given, will be run as FastSinkSourcePlus. 
+        For FastSinkSourcePlus, if the lambda parameter is desired, it should already have been included in the graph normalization process. 
         See the function normalizeGraphEdgeWeights in alg_utils.py 
     *max_iters*: max # of iterations to run SinkSource. 
         If 0, use spsolve to solve the equation directly 
@@ -141,7 +141,7 @@ def runLocal(P, positives, negatives=None):
         Essentially one iteration of SinkSource.
     *P*: Network as a scipy sparse matrix. Should already be normalized
     *positives*: numpy array of node ids to be used as positives
-    *negeatives*: numpy array of node ids to be used as negatives. 
+    *negatives*: numpy array of node ids to be used as negatives. 
         If not given, will be run as "LocalPlus". 
     """
     f = np.zeros(P.shape[0])
