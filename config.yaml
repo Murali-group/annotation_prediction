@@ -72,6 +72,12 @@ algs:
 
     genemania:
         should_run: [False]
+        alpha: [1.0]
+        tol: [1e-05]
+
+    genemaniaplus:
+        should_run: [False]
+        alpha: [1.0]
         tol: [1e-05]
 
     fastsinksource:
