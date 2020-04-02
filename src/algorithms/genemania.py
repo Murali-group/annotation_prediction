@@ -22,6 +22,7 @@ def runGeneMANIA(L, y, tol=1e-05, Milu=None, verbose=False):
     """
     *L*: Laplacian of the original network
     *y*: vector of positive and negative assignments
+         If y does not contain negatives, will be run as GeneManiaPlus. 
     *tol*: Conjugate Gradient tolerance for convergance
 
     *returns*: scores array, process_time, wall_time
