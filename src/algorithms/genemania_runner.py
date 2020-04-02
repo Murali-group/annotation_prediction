@@ -59,7 +59,7 @@ def compute_preconditioner(L):
 
 def run(run_obj):
     """
-    Function to run GeneMANIA
+    Function to run GeneMANIA and GeneManiaPlus (the version of GeneMania without negative examples).
     *terms_to_run*: terms for which to run the method. 
         Must be a subset of the terms present in the ann_obj
     """
