@@ -18,10 +18,13 @@ def setup_laplacian(W):
     return L
 
 
-def runGeneMANIA(L, y, tol=1e-05, Milu=None, verbose=False):
+def runGeneMANIA(L, y, alpha=1, tol=1e-05, Milu=None, verbose=False):
     """
     *L*: Laplacian of the original network
-    *y*: vector of positive and negative assignments
+    *y*: vector of positive and negative assignments. 
+        If no negative examples as given, all non-positive values will retain an initial value of 0
+    *alpha*: parameter between 0 and 1 to control the influence of neighbors in the network.
+        0 would ignore the network completely, and nodes would get their original score.
     *tol*: Conjugate Gradient tolerance for convergance
 
     *returns*: scores array, process_time, wall_time
@@ -49,7 +52,7 @@ def runGeneMANIA(L, y, tol=1e-05, Milu=None, verbose=False):
     start_process_time = time.process_time()
     # this measures the amount of time that has passed
     start_wall_time = time.time()
-    M = eye(L.shape[0]) + L
+    M = eye(L.shape[0]) + alpha*L
 
     # keep track of the number of iterations
     num_iters = 0

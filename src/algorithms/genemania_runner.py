@@ -29,8 +29,8 @@ def setupInputs(run_obj):
 
 # setup the params_str used in the output file
 def setup_params_str(weight_str, params, name='genemania'):
-    params_str = "%s-tol%s" % (
-        weight_str, str(params['tol']).replace('.','_'))
+    params_str = "%s-a%s-tol%s" % (
+        weight_str, str_(params.get('alpha',1.0)), str_(params['tol']))
     return params_str
 
 
@@ -93,8 +93,10 @@ def run(run_obj):
 
         # now actually run the algorithm
         scores, process_time, wall_time, iters = genemania.runGeneMANIA(
-                L, y, tol=float(run_obj.params['tol']), Milu=Milu,
-                verbose=run_obj.kwargs.get('verbose', False))
+            L, y,
+            alpha=float(run_obj.params.get('alpha',1)),
+            tol=float(run_obj.params['tol']),
+            Milu=Milu, verbose=run_obj.kwargs.get('verbose', False))
         if run_obj.kwargs.get('verbose', False) is True:
             tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
                     "(%0.3f sec, %0.3f wall_time) for %s" % (process_time, wall_time, term))
@@ -119,3 +121,7 @@ def run(run_obj):
     run_obj.term_scores = term_scores
     run_obj.params_results = params_results
     return
+
+
+def str_(s):
+    return str(s).replace('.','_')
