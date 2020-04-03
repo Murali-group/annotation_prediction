@@ -10,5 +10,7 @@ pyyaml
 tqdm
 # used for CV and to compute the AUPRC and AUROC 
 sklearn
+# used for plotting
+seaborn
 # required for aptrank
 #cvxopt
