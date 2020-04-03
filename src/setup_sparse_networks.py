@@ -502,7 +502,7 @@ def read_pos_neg_table_file(pos_neg_file):
     # convert it to a sparse matrix 
     print("Building a sparse matrix of annotations")
     ann_matrix = sp.coo_matrix((data, (i_list, j_list)), shape=(len(prots), len(terms)), dtype=float).tocsr()
-    ann_matrix = ann_matrix.transpose()
+    ann_matrix = ann_matrix.transpose().tocsr()
     return ann_matrix, terms, prots
 
 
