@@ -171,13 +171,16 @@ def setup_net(input_dir, dataset, **kwargs):
         net_files = ["%s/%s" % (net_dir, net_file) for net_file in dataset['net_files']]
     unweighted = dataset['net_settings'].get('unweighted', False) if 'net_settings' in dataset else False
     # if multiple networks are passed in, then set multi_net to True automatically
-    if (net_files is not None and len(net_files) > 1) or 'string_net_files' in dataset:
+    if (net_files is not None and len(net_files) > 1) or \
+       ('string_net_files' in dataset and len(dataset['string_net_files'])) > 1:
         if dataset.get('multi_net') is False:
             print("WARNING: multiple networks were passed in. Setting 'multi_net' to True")
         dataset['multi_net'] = True
+    else:
+        dataset['multi_net'] = False
 
     # parse and store the networks 
-    if dataset.get('multi_net') is True: 
+    if dataset.get('multi_net') is True or 'string_net_files' in dataset: 
         # if multiple file names are passed in, then map each one of them
         if net_files is not None or 'string_net_files' in dataset:
             string_net_files = dataset.get('string_net_files', [])
