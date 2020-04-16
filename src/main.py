@@ -18,6 +18,7 @@ from .evaluate import eval_utils as eval_utils
 from .evaluate import cross_validation as cross_validation
 from .evaluate import eval_leave_one_species_out as eval_loso
 from .utils import file_utils as utils
+from .utils import net_utils
 from .utils import string_utils as string_utils
 from .utils import config_utils as config_utils
 
@@ -91,6 +92,8 @@ def setup_opts():
             help="Force re-running algorithms if the output files already exist")
     group.add_argument('--forcenet', action="store_true",
             help="Force re-building network matrix from scratch")
+    group.add_argument('--stats-only', action="store_true",
+            help="Only print out statistics about the network(s)")
     group.add_argument('--verbose', action="store_true",
             help="Print additional info about running times and such")
 
@@ -112,6 +115,9 @@ def run(config_map, **kwargs):
         if len(ann_obj.terms) == 0:
             print("No terms found. Skipping this dataset")
             continue
+        if kwargs.get('stats_only'):
+            continue
+
         # the outputs will follow this structure:
         # outputs/<net_version>/<exp_name>/<alg_name>/output_files
         out_dir = "%s/%s/%s/" % (output_dir, dataset['net_version'], dataset['exp_name'])
@@ -272,6 +278,10 @@ def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
     selected_terms, ann_obj, eval_ann_obj = load_annotations(net_obj.nodes, dataset, input_dir, **kwargs)
     if kwargs.get('verbose'):
         utils.print_memory_usage()
+
+    # print out some statistics about the network
+    if net_obj.multi_net is False:
+        net_utils.print_net_stats(net_obj.W, ann_obj.ann_matrix)
 
     #algs = get_algs_to_run(alg_settings)
     return net_obj, ann_obj, eval_ann_obj
