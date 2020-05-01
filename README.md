@@ -19,7 +19,7 @@ pip install -r requirements.txt
 ```
 
 ## Download Datasets
-The network and GO term annotations for the 200 bacterial species with the most EXPC and COMP annotations are available here: http://bioinformatics.cs.vt.edu/~jeffl/supplements/2020-fastsinksource/
+The networks and GO term annotations for the 200 bacterial species with the most EXPC and COMP annotations are available here: http://bioinformatics.cs.vt.edu/~jeffl/supplements/2020-fastsinksource/
 
 ## Run the FastSinkSource Pipeline
 ### Generate predictions
