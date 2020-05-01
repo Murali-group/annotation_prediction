@@ -18,6 +18,9 @@ source py3env/bin/activate
 pip install -r requirements.txt
 ```
 
+## Download Datasets
+The network and GO term annotations for the 200 bacterial species with the most EXPC and COMP annotations are available here: http://bioinformatics.cs.vt.edu/~jeffl/supplements/2020-fastsinksource/
+
 ## Run the FastSinkSource Pipeline
 ### Generate predictions
 The script will automatically generate predictions from each of the given methods with `should_run: [True]` in the config file. The default number of predictions stored is 10. To write more, use either the `--num-pred-to-write` or `--factor-pred-to-write options` (see python run_eval_algs.py --help). For example:
