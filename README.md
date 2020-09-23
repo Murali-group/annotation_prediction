@@ -1,21 +1,25 @@
 # FastSinkSource
-This is the main repository for the paper "Accurate and Efficient Gene Function Prediction using a Multi-Bacterial Network".
+This was one of the main repositories for the paper "Accurate and Efficient Gene Function Prediction using a Multi-Bacterial Network".
+
+This repository contains the main LOSO validation pipeline, algorithms, and plotting functions for the paper. 
+This repository is no longer maintained and was replaced by https://github.com/Murali-group/annotation-prediction, 
+which is meant to be agnostic to the type of hierarchy used.
 
 ## Installation
 These scripts requires Python 3 due to the use of obonet to build the GO DAG.
 
-Required packages: `networkx`, `numpy`, `scipy`, `pandas`, `sklearn`, `obonet`, `pyyaml`, `tqdm`
+- Required Python packages: `networkx`, `numpy`, `scipy`, `pandas`, `sklearn`, `obonet`, `pyyaml`, `tqdm`, `rpy2`
+- Required R packages: PPROC
 
-To install the required packages:
 ```
-pip3 install -r requirements.txt
-```
-
-Optional: use a virtual environment
-```
-virtualenv -p /usr/bin/python3 py3env
-source py3env/bin/activate
+conda create -n fastsinksource python=3.7 r=3.6
+conda activate fastsinksource
 pip install -r requirements.txt
+```
+To install the R packages:
+```
+R -e "install.packages('https://cran.r-project.org/src/contrib/PRROC_1.3.1.tar.gz', type = 'source')"
+conda install -c bioconda bioconductor-clusterprofiler
 ```
 
 ## Download Datasets
