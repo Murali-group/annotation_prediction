@@ -230,6 +230,27 @@ class Sparse_Annotations:
         self.ann_matrix = self.ann_matrix.dot(diag)
 
 
+def permute_sparse_matrix(M, new_row_order=None, new_col_order=None):
+    """
+    Reorders the rows and/or columns in a scipy sparse matrix 
+        using the specified array(s) of indexes
+        e.g., [1,0,2,3,...] would swap the first and second row/col.
+    """
+    if new_row_order is None and new_col_order is None:
+        return M
+
+    new_M = M
+    if new_row_order is not None:
+        permute_mat = sp.eye(M.shape[0]).tocoo()
+        permute_mat.row = permute_mat.row[new_row_order]
+        new_M = permute_mat.dot(new_M)
+    if new_col_order is not None:
+        permute_mat = sp.eye(M.shape[1]).tocoo()
+        permute_mat.col = permute_mat.col[new_col_order]
+        new_M = new_M.dot(permute_mat)
+    return new_M
+
+
 def propagate_ann_up_dag(pos_mat, dag_matrix):
     """ propagate all annotations up the DAG
     """
@@ -587,8 +608,6 @@ def setup_sparse_annotations(pos_neg_file):
         2) List of goterms in the order in which they appear in the matrix
         3) List of prots in the order in which they appear in the matrix
     """
-    # TODO store the annotations in sparse matrix form, then load the sparse matrix directly
-    # In the case of specific goterms passed in, load the matrix, then keep only the specified goterms 
     print("\nSetting up annotation matrix")
 
     print("Reading positive and negative annotations for each protein from %s" % (pos_neg_file))
