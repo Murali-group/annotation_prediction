@@ -14,6 +14,7 @@ import networkx as nx
 import matplotlib
 matplotlib.use('Agg')  # To save files remotely. 
 import matplotlib.pyplot as plt
+plt.rcParams['svg.fonttype'] = 'none'  # To make sure text is stored as text for svg.
 import matplotlib.patches as patches
 import pandas as pd
 import seaborn as sns
@@ -48,6 +49,7 @@ ALG_NAMES = {
     'fastsinksource': 'FSS', 'fastsinksourceplus': 'FSS+',
     'genemania': 'GeneMANIA',  
     'birgrank': 'BirgRank', 'aptrank': 'AptRank OneWay',
+    'async_rw': 'AsyncRW',
     }
 
 measure_map = {'fmax': r'F$_{\mathrm{max}}$'}
@@ -56,24 +58,28 @@ param_map = {'alpha': r'$\rm \alpha$'}
 
 # tried to be fancy :P
 # colors: https://coolors.co/ef6e4a-0ec9aa-7c9299-5d88d3-96bd33
-#my_palette = ["#EF6E4A", "#0EC9AA", "#7C9299", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
-# changed birgrank (third) to purple
-my_palette = ["#EF6E4A", "#0EC9AA", "#8e71d0", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
+#my_palette = ["#EF6E4A", "#0EC9AA", "#5D88D3", "#96BD33", "#937860", "#EFD2B8"]
+# changed birgrank (third) from gray "#7C9299", to purple "#8e71d0"
+# changed sinksource (fifth) from green "#96BD33" to brown "#bd7f33"
+my_palette = ["#EF6E4A", "#0EC9AA", "#8e71d0", "#5D88D3", "#bd7f33", "#937860", "#EFD2B8"]
 alg_colors = {
+    # temporarily replacing fastsinksource with sinksource
     'fastsinksource': my_palette[0],
+    'sinksource': my_palette[4],
     'genemania': my_palette[1],
     'birgrank': my_palette[2],
+    'async_rw': my_palette[5],
     'localplus': my_palette[3],
-    'sinksource': my_palette[4],
     }
 # default list of markers
 my_shapes = ['o', 's', 'P', '^', 'x', '*', '+', 'v', 'x',]
 alg_shapes = {
     'fastsinksource': 'o',
+    'sinksource': 'x',
     'genemania': 's',
     'birgrank': 'P',
+    'async_rw': 'v',
     'localplus': '^',
-    'sinksource': 'x',
     }
 for alg, color in alg_colors.copy().items():
     alg_colors[ALG_NAMES[alg]] = color
@@ -98,6 +104,8 @@ def setup_opts():
                      help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
     group.add_argument('--goterm', '-G', type=str, action="append",
                      help="Specify the GO terms to use (should be in GO:00XX format)")
+    group.add_argument('--taxon', '-T', type=str, 
+                     help="Specify the taxon ID (only used to get the prec-rec file)")
     group.add_argument('--exp-type', type=str, default='cv-5folds',
                      help='Type of experiment (e.g., cv-5fold, loso, temporal-holdout). Default: cv-5folds')
     group.add_argument('--num-reps', type=int, default=1,
@@ -107,10 +115,12 @@ def setup_opts():
     group.add_argument('--only-terms-file', type=str, 
                      help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
     group.add_argument('--only-terms-name', type=str, default='',
-                     help="If --only-terms is specified, use this option to append a name to the file. Default is to use the # of terms")
+                     help="If --only-terms-file is specified, use this option to append a name to the file. Default is to use the # of terms")
     group.add_argument('--most-specific-terms', action='store_true', default=False,
                      help="If 'loso' is specified for --exp-type, then for each species, " + \
                           "show results for only the most specific terms")
+    group.add_argument('--only-taxon-file', type=str,
+                     help="Limit the results to a specific set of taxons")
     group.add_argument('--postfix', type=str, 
                      help="Postfix to add to the end of the files")
 
@@ -122,6 +132,8 @@ def setup_opts():
                      help="Compare all runners in the config file using a boxplot")
     group.add_argument('--line', action='store_true', default=False,
                      help="Compare all runners on all datasets in the config file using a lineplot")
+    group.add_argument('--local-line', action='store_true', default=False,
+                       help="Replace the localplus points with a single point for ssnT (i.e., the real baseline, comparative to BLAST) and a dahsed line.")
     group.add_argument('--ci', type=float,
                      help="Show the specified confidence interval (between 0 and 100) for the line plot")
     group.add_argument('--scatter', action='store_true', default=False,
@@ -142,12 +154,16 @@ def setup_opts():
     # figure parameters
     group = parser.add_argument_group('Figure Options')
     # Moved to the config file
-    group.add_argument('--title','-T', 
+    group.add_argument('--title',
                      help="Title to give the figure. Default is the exp_name ")
     group.add_argument('--for-paper', action='store_true', default=False,
                      help="Exclude extra information from the title and make the labels big and bold")
     group.add_argument('--horiz','-H', dest="horizontal", action='store_true', default=False,
                      help="Flip the plot so the measure is on the y-axis (horizontal). Default is x-axis (vertical)")
+    group.add_argument('--ylim', type=float, nargs=2,
+                     help="Set the y axis min and max to these two values")
+    group.add_argument('--svg', action='store_true', default=False,
+                     help="Write an svg in addition to a pdf")
     group.add_argument('--png', action='store_true', default=False,
                      help="Write a png in addition to a pdf")
     group.add_argument('--term-stats', type=str, action='append',
@@ -188,7 +204,8 @@ def parse_args():
 
 
 def main(config_map, ax=None, out_pref='', **kwargs):
-
+    if 'out_pref' in kwargs:
+        del kwargs['out_pref']
     input_settings, alg_settings, output_settings, out_pref, kwargs = setup_variables(
         config_map, out_pref, **kwargs)
     kwargs['out_pref'] = out_pref
@@ -204,18 +221,22 @@ def main(config_map, ax=None, out_pref='', **kwargs):
         terms = kwargs['goterm'] if kwargs['goterm'] is not None else ['']
         for term in terms:
             term = '-'+term if term != '' else ''
-            prec_rec = 'prec-rec' + term
+            prec_rec = 'prec-rec' + kwargs.get('taxon','') + term
+            print(prec_rec)
             #kwargs['prec_rec'] = prec_rec
             df_all = load_all_results(input_settings, alg_settings, output_settings, prec_rec_str=prec_rec, **kwargs)
             if len(df_all) == 0:
                 print("no results found. Quitting")
                 sys.exit()
             # limit to the specified terms
-            if kwargs['only_terms'] is not None:
-                df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
+            # TODO
+            #if kwargs['only_terms'] is not None:
+            #    df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
 
             title = '-'.join(df_all['plot_exp_name'].unique())
-            plot_curves(df_all, title=title, **kwargs)
+            print(kwargs['title'])
+            kwargs['title'] = title
+            plot_curves(df_all, **kwargs)
     else:
         # get the path to the specified files for each alg
         df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
@@ -279,7 +300,11 @@ def setup_variables(config_map, out_pref='', **kwargs):
     output_settings = config_map['output_settings']
     # update the settings specified in this script with those set in the yaml file
     if config_map.get('eval_settings'):
-        kwargs.update(config_map['eval_settings'])
+        #kwargs.update(config_map['eval_settings'])
+        for key, val in config_map['eval_settings'].items():
+            # if the user provided a value for this parameter (i.e., in kwargs), don't overwrite it
+            if key not in kwargs or kwargs[key] is None or kwargs[key] == "":
+                kwargs[key] = val
     if config_map.get('plot_settings'):
         #config_map['plot_settings'].update(kwargs)
         kwargs.update(config_map['plot_settings'])
@@ -325,7 +350,11 @@ def setup_variables(config_map, out_pref='', **kwargs):
 def savefig(out_file, **kwargs):
     print("Writing %s" % (out_file))
     plt.savefig(out_file, bbox_inches='tight')
+    if kwargs.get('svg'):
+        print("Writing %s" % (out_file.replace('.pdf','.svg')))
+        plt.savefig(out_file.replace('.pdf','.svg'), bbox_inches='tight')
     if kwargs.get('png'):
+        print("Writing %s" % (out_file.replace('.pdf','.png')))
         plt.savefig(out_file.replace('.pdf','.png'), bbox_inches='tight')
     plt.close()
 
@@ -365,10 +394,16 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
             f, ax = plt.subplots(figsize=(6,5))
         else:
             f, ax = plt.subplots(figsize=(4,6))
-    if kwargs.get('for_paper'):
-        # make the fonts bigger
-        matplotlib.rc('xtick', labelsize=18) 
-        matplotlib.rc('ytick', labelsize=18) 
+
+    if kwargs.get('local_line'):
+        # replace localplus with a dashed line for ssnT
+        df_local = df[(df['Algorithm'] == "Local") & (df['plot_exp_name'] == "ssnT")]
+        df = df[df['Algorithm'] != "Local"]
+        df = pd.concat([df, df_local]) 
+        # also keep only the last combination for async_rw 
+        df_asyncrw = df[(df['Algorithm'] == "AsyncRW") & (df['plot_exp_name'] == "ssnC+stringC,ssnLocal")]
+        df = df[df['Algorithm'] != "AsyncRW"]
+        df = pd.concat([df, df_asyncrw]) 
 
     # doesn't work for categorical data
     #sns.lineplot(x=measure, y='pen-alg', data=df, ax=ax,
@@ -385,10 +420,17 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
             ax=ax, markers=curr_markers,  # order=[kwargs['alg_names'][a] for a in algorithms],
             palette=curr_palette)
 
+    if kwargs.get('local_line'):
+        ax.axhline(df_local[measure].median(), color=alg_colors['Local'], linestyle='--')
+
     plt.setp(ax.lines,linewidth=1)  # set lw for all lines of g axes
-    if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[-1]) > 10:
-        ax.tick_params(axis='x', rotation=45)
+    if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[0]) > 10:
+        ax.tick_params(axis='x', rotation=25)
         ax.tick_params(axis='y', labelsize='large')
+    if kwargs.get('for_paper'):
+        # make the fonts bigger
+        ax.tick_params(axis='y', labelsize='large')
+        ax.tick_params(axis='x', labelsize='large')
 
     # TODO add an option for this
     if kwargs.get('for_paper') and kwargs.get('horizontal'):
@@ -404,6 +446,9 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
         x1, x2 = ax.get_xlim()
         ax.set_xlim(int(x1)-0.5, int(x2)+0.5)
 
+    if kwargs.get('ylim'):
+        y1, y2 = kwargs['ylim']
+        ax.set_ylim(y1, y2)
     ## change the fmax axis to be between 0 and 1
 #    if kwargs.get('for_paper'):
 #        # TODO add an option for this:
@@ -457,18 +502,18 @@ def add_net_combination_table(ax, plot_exp_names, checkmark="✓"):
     # now add the checkmarks
     net_types = [
         'ssnT',
-        'ssnLocal',
         'ssnC',
-        'stringT',
         'stringC',
+        'stringT',
+        'ssnLocal',
     ][::-1]
     # change the labels here
     net_type_labels = {
         'ssnT': 'SSN-T',
-        'ssnLocal': 'SSN-Neighbors',
         'ssnC': 'SSN-C',
-        'stringT': 'STRING-T',
         'stringC': 'STRING-C',
+        'stringT': 'STRING-T',
+        'ssnLocal': 'SSN-Nbrs',
         }
     for x, plot_exp_name in enumerate(plot_exp_names):
         #print(plot_exp_name)
@@ -479,7 +524,7 @@ def add_net_combination_table(ax, plot_exp_names, checkmark="✓"):
     # set the tick labels as the network combination types
     ax_below.set_yticklabels(
         [net_type_labels[net_type] for net_type in net_types]+[""],
-        fontsize="14")
+        fontsize="12")
     for label in ax_below.yaxis.get_majorticklabels():
         # this is a trick to get the tick label to be between the grid lines
         label.set_verticalalignment('bottom')
@@ -511,10 +556,15 @@ def plot_multi_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, *
     df['Algorithm'] = df['Algorithm'].astype(str)
     df = df[['Algorithm', measure, 'plot_exp_name']]
     g = sns.catplot(x=measure, y='Algorithm', row='plot_exp_name', data=df,  # hue='Algorithm',
-                    height=1., aspect=4, palette=curr_palette, 
+                    height=1., aspect=4, palette=curr_palette, fliersize=1.5, 
                     #orient='v' if not kwargs.get('horizontal') else 'h',
-                    kind='box',)
-                    #kind="violin", cut=0, inner='quartile',)
+                    kind='box',
+                    saturation=0.9,
+                    # TODO Extend the whiskers to all values if there's too many points
+                    #showfliers=False if len(df) > 50000 else True, 
+                    whis=10000 if len(df) > 100000 else 1.5, 
+                    #kind="violin", cut=0, inner='quartile',
+    )
     # put less space between the plots
     g.fig.subplots_adjust(hspace=.05)
     g.set(xticks=np.arange(0,11)*0.1)
@@ -546,13 +596,21 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
             order += [str(p) for p in kwargs['alg_params'][alg][kwargs['compare_param']]]
     else:
         order = [kwargs['alg_names'][a] for a in kwargs['algs']]
+    try:
+        # If there are algorithms which don't have a set shape or color, this will fail
+        curr_palette = [alg_colors[alg] for alg in order]
+        curr_markers = [alg_shapes[alg] for alg in order]
+    except KeyError:
+        curr_palette = my_palette
+        curr_markers = my_shapes 
     print("horizontal: %s" % (kwargs.get('horizontal')))
     print("orient: %s" % ('v' if not kwargs.get('horizontal') else 'h'))
 
     ax = sns.boxplot(data=df, ax=ax,
                      fliersize=1.5, order=order,
                      orient='v' if not kwargs.get('horizontal') else 'h',
-                     palette=my_palette if 'palette' not in kwargs else kwargs['palette'],
+                     palette=curr_palette if 'palette' not in kwargs else kwargs['palette'],
+                     saturation=0.9, 
                 )
 
     xlabel = ""
@@ -584,7 +642,8 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
         # also put the fmax on the plot, and add it to the label
         new_alg_names = []
         fmax_points = {}
-        for alg in curr_df['Algorithm'].unique():
+        algs = curr_df['Algorithm'].unique()
+        for alg in algs:
             df_alg = curr_df[curr_df['Algorithm'] == alg]
             #print(df_alg['prec'], df_alg['rec'])
             fmax, idx = eval_utils.compute_fmax(df_alg['prec'].values, df_alg['rec'].values, fmax_idx=True)
@@ -592,10 +651,19 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
             new_alg_names.append(new_alg_name) 
             fmax_points[alg] = (df_alg['prec'].values[idx], df_alg['rec'].values[idx])
 
+        try:
+            # If there are algorithms which don't have a set shape or color, this will fail
+            curr_palette = [alg_colors[alg] for alg in algs]
+            curr_markers = [alg_shapes[alg] for alg in algs]
+        except KeyError:
+            curr_palette = my_palette
+            curr_markers = my_shapes 
+
         fig, ax = plt.subplots()
         # TODO show the standard deviation from the repititions
         sns.lineplot(x='rec', y='prec', hue='Algorithm', data=curr_df,
-                ci=None, ax=ax, legend=False,
+                     ci=None, ax=ax, legend=False,
+                     palette=curr_palette,
                 )
                 #xlim=(0,1), ylim=(0,1), ci=None)
 
@@ -606,10 +674,10 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
         ax.set_xlabel("Recall")
         ax.set_ylabel("Precision")
 
-        # also add the fmax point to the plot
+        # also add the fmax point as a star to the plot
         for i, alg in enumerate(fmax_points):
             prec, rec = fmax_points[alg]
-            ax.plot([rec], [prec], marker="*", color=sns.color_palette()[i])
+            ax.plot([rec], [prec], marker="*", markersize=15, color=curr_palette[i])
 
         if kwargs.get('term_stats') is not None:
             df_stats = kwargs['term_stats'] 
@@ -774,7 +842,7 @@ def results_overview(df, measures=['fmax']):
     """
     Print an overview of the number of values / terms, as well as the median fmax
     """
-    print("plot_exp_name\tmeasure\talg\tmedian\t# terms")
+    print("plot_exp_name\tmeasure\talg\tmedian\t# terms\t# sp-term pairs")
     #print("net_version\texp_name\tmeasure\talg\tmedian\t# terms")
     #for plot_exp_name in sorted(df['plot_exp_name'].unique()):
     for plot_exp_name in df['plot_exp_name'].unique():
@@ -784,8 +852,9 @@ def results_overview(df, measures=['fmax']):
         # limit the goterms to those that are also present for SinkSource(?)
         for measure in measures:
             for alg in sorted(df_curr['Algorithm'].unique()):
-                df_alg = df_curr[df_curr['Algorithm'] == alg][measure]
-                print("%s\t%s\t%s\t%0.3f\t%d" % (plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
+                df_alg = df_curr[df_curr['Algorithm'] == alg]
+                print("%s\t%s\t%s\t%0.3f\t%d\t%d" % (plot_exp_name, measure, alg, df_alg[measure].median(), df_alg['#goid'].nunique(), len(df_alg)))
+                #print("%s\t%s\t%s\t%0.3f\t%d" % (plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
                 #print("%s\t%s\t%s\t%s\t%0.3f\t%d" % (net_version, exp_name, measure, alg, df_alg.median(), len(df_alg)))
 
 
@@ -794,7 +863,7 @@ def get_algs_to_run(alg_settings, **kwargs):
     global print_warning
     # if there aren't any algs specified by the command line (i.e., kwargs),
     # then use whatever is in the config file
-    if kwargs['algs'] is None:
+    if kwargs.get('algs') is None:
         algs_to_run = run_eval_algs.get_algs_to_run(alg_settings)
         kwargs['algs'] = [a.lower() for a in algs_to_run]
         if print_warning:
@@ -850,7 +919,16 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
                 if kwargs.get('most_specific_terms') and len(df) > 0:
                     df = get_most_specific_sp_term_pairs(
                             df, go_dags, **kwargs)
-                    print("MAD: %s" % (mad(df['fmax'].values)))
+                    #print("MAD: %s" % (mad(df['fmax'].values)))
+                # limit the fmax values to these taxons if specified
+                if kwargs.get('only_taxon_file') and len(df) > 0:
+                    # load the taxons from that file
+                    print("reading %s" % (kwargs['only_taxon_file']))
+                    df_taxons = pd.read_csv(kwargs['only_taxon_file'], sep='\t', header=None)
+                    #print("%d taxons before" % (df['#taxon'].nunique()))
+                    num_taxons = df['#taxon'].nunique()
+                    df = df[df['#taxon'].isin(df_taxons[0])]
+                    print("%d taxons before, %d after" % (num_taxons, df['#taxon'].nunique()))
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
     return df_all

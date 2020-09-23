@@ -37,13 +37,10 @@ def main(config_map, out_pref='', **kwargs):
 
     if out_pref is not None:
         # type of sinksource-squeeze rank comparison
-        if alg_settings[alg]['rank_all'][0] is True:
-            exp_type = "all-"
-        elif alg_settings[alg]['rank_pos_neg'][0] is True:
+        if alg_settings[alg]['rank_pos_neg'][0] is True:
             exp_type = "pos-neg-"
         else:
-            print("ERROR: must speficy either 'rank_all' or 'rank_pos_neg'") 
-            sys.exit("Quitting")
+            exp_type = "all-"
         # TODO how should I handle multiple parameters?
         alpha = alg_settings[alg]['alpha'][0]
         out_pref = "%s%sa%s" % (out_pref, exp_type, alpha)
@@ -91,17 +88,18 @@ def get_axes_to_plot():
 
 def plot(df_cutoffs, out_pref, alpha=0.95):
     f, ax1, ax2 = get_axes_to_plot()
-    sns.boxplot(data=df_cutoffs, ax=ax1, order=['0.70', "0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
-    sns.boxplot(data=df_cutoffs, ax=ax2, order=['0.70', "0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.5)
+    sns.boxplot(data=df_cutoffs, ax=ax1, order=['0.70', "0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.0)
+    sns.boxplot(data=df_cutoffs, ax=ax2, order=['0.70', "0.80", '0.90', '0.95', '0.99', '1.0', 'Fixed ordering'], fliersize=1.0)
     # f, ax1 = plt.subplots()
     # sns.boxplot(df_cutoffs, ax=ax1)
 
+    # these are juts heuristics to get the plot around the right range
     ymin, ymax = ax1.get_ylim()
     # ax1.set_ylim(-2, df_cutoffs['1.0'].max())
-    ax1.set_ylim(-2, df_cutoffs['0.99'].max()+5)
+    ax1.set_ylim(-2, df_cutoffs['0.90'].max()+5)
     #ax1.set_ylim(0, 75)
     ymin, ymax = ax2.get_ylim()
-    ax2.set_ylim(df_cutoffs['0.99'].max()+10, ymax)
+    ax2.set_ylim(df_cutoffs['0.90'].max()+10, ymax)
     #ax2.set_ylim(df_cutoffs['Fixed ordering'].min()-5, ymax)
     #ax2.set_ylim(df_cutoffs['1.0'].min()-10, ymax)
 
@@ -132,7 +130,7 @@ def plot(df_cutoffs, out_pref, alpha=0.95):
     # out_file = "%s/%s-%s-loso-pos-neg-ktau-cutoffs-boxplots.png" % (out_dir, version, h)
     out_file = "%s-ktau-cutoffs-boxplots.pdf" % (out_pref)
     print("Writing figure to %s" % (out_file))
-    plt.savefig(out_file)
+    plt.savefig(out_file, bbox_inches='tight')
     #plt.show()
     plt.close()
 

@@ -1,4 +1,4 @@
-# For each target species, plot the fmax distributions and # annotations from 
+# For each target species, plot the fmax boxplot distributions and # annotations being evaluated.
 
 from collections import defaultdict
 import itertools
@@ -55,7 +55,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     ann_obj, eval_ann_obj = load_ann_datasets(
             out_dir, dataset, in_dir, 
             alg_settings, **kwargs)
-
+    
     #ann_obj, eval_ann_obj, goid_names_file = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
     kwargs['goid_names_file'] = get_goid_names_file(in_dir, dataset)
     # if eval_ann_obj is specified, then use it to get stats instead of the ann_obj
@@ -202,10 +202,10 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
         # get comparative p-values
         # UPDATE: limit to taxons that have at least 5 terms
         # TODO make an option for this
-        sp_term_cutoff = 3
+        sp_term_cutoff = 5
         df_taxon_cutoff = pd.concat(dfT for taxon, dfT in df.groupby('#taxon') \
-                                    if dfT['#goid'].nunique() < sp_term_cutoff)
-                                    #if dfT['#goid'].nunique() >= sp_term_cutoff)
+                                    #if dfT['#goid'].nunique() < sp_term_cutoff)
+                                    if dfT['#goid'].nunique() >= sp_term_cutoff)
         sig_results, sig_species = eval_stat_sig(
             df, stat_file, measure=measure,
             sort_taxon_by_fmax=sort_taxon_by_fmax, **kwargs)
@@ -221,8 +221,14 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
         out_file = "%s/stats/loso-%s-%s-%s%s.pdf" % (
                 out_pref, measure, kwargs['alg1'], kwargs['alg2'], kwargs.get('plot_postfix',''))
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
-        scatterplot_fmax(df, goid_num_ann, measure=measure, 
-                out_file=out_file, **kwargs)
+        if kwargs.get('compare_taxon_median'):
+            out_file = out_file.replace('.pdf','-taxon-median.pdf')
+            # summarize the fmax values by the median per species
+            scatterplot_taxon_fmax(df, measure=measure, 
+                    out_file=out_file, **kwargs)
+        else:
+            scatterplot_fmax(df, goid_num_ann, measure=measure, 
+                    out_file=out_file, **kwargs)
 
 
 def eval_stat_sig(
@@ -236,12 +242,18 @@ def eval_stat_sig(
     # Don't think sorting is needed
     #df_curr.sort_values('goid', inplace=True) 
     for a1, a2 in combinations:
-        a1_fmax = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a1, a1)][measure]
-        a2_fmax = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a2, a2)][measure]
+        df1 = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a1, a1)]
+        df2 = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a2, a2)]
+        # make sure they line up
+        df1 = df1.loc[df1.index.isin(df2.index)]
+        df2 = df2.loc[df2.index.isin(df1.index)]
+        a1_fmax = df1[measure]
+        a2_fmax = df2[measure]
         #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
         test_statistic, pval = wilcoxon(a1_fmax, a2_fmax, alternative='greater') 
         out_str += "%s\t%s\t%0.3e\t%0.3e\n" % (a1, a2, pval, pval*len(combinations))
 
+    print(out_str)
     # also compare individual species
     curr_species = df_curr['#taxon'].unique()
     # limit the species for which we run the test to those that have at least 5 terms
@@ -255,8 +267,13 @@ def eval_stat_sig(
         #name = f_settings.NAME_TO_SHORTNAME2.get(selected_species[str(s)],'-')
         name = kwargs['sp_names'].get(str(s),'-') if 'sp_names' in kwargs else '-'
         df_s = df_curr[df_curr['#taxon'] == s]
-        a1_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg1, alg1)][measure]
-        a2_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg2, alg2)][measure]
+        df1 = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(a1, a1)]
+        df2 = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(a2, a2)]
+        # make sure they line up
+        df1 = df1.loc[df1.index.isin(df2.index)]
+        df2 = df2.loc[df2.index.isin(df1.index)]
+        a1_fmax = df1[measure]
+        a2_fmax = df2[measure]
         if s in species_with_terms:
         #try:
             #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
@@ -340,7 +357,7 @@ def plot_fmax_eval(
         sns.boxplot(x=y,y=x, order=sort_by_med_fmax[::-1], 
                 hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
                 data=df_curr, orient='v', fliersize=1.5,
-                palette=curr_palette, saturation=0.85)
+                palette=curr_palette, saturation=0.9)
     else:
         sns.swarmplot(x=x,y=y, order=sort_by_med_fmax, dodge=True,
                     hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
@@ -429,6 +446,52 @@ def plot_fmax_eval(
     return
 
 
+def scatterplot_taxon_fmax(df, measure='fmax', 
+        out_file=None, alg1="sinksource", alg2="localplus", **kwargs):
+    """ 
+    Summarize the fmax values by the median per taxon,
+    then make a scatterplot of those values between the two algorithms
+    """
+    alg1 = kwargs['alg_names'].get(alg1, alg1)
+    alg2 = kwargs['alg_names'].get(alg2, alg2)
+    print("\nComparing %s values of %s and %s" % (measure, alg2, alg1))
+    df1 = df[df['Algorithm'] == alg1]
+    df2 = df[df['Algorithm'] == alg2]
+    df1 = df1[['#taxon', 'fmax']].groupby('#taxon').median()
+    df2 = df2[['#taxon', 'fmax']].groupby('#taxon').median()
+    comparison = '%s - %s Fmax' % (alg1, alg2)
+    df1[comparison] = df1['fmax'] - df2['fmax']
+
+    # now make the scatterplot
+    g = sns.jointplot(x='fmax', y=comparison, data=df1,
+                #    s=50,
+    )
+    #sns.scatterplot(x='fmax', y=comparison, data=df1,
+    #                s=50,
+    #)
+    measure = measure_map.get(measure, measure.upper())
+    xlabel = r'%s %s'%(alg1,measure)
+    ylabel = r'%s - %s %s'%(alg1, alg2, measure)
+    size = 16 if kwargs.get('for_paper') else 12
+    ax = g.ax_joint
+    ax.set_xlabel(xlabel, fontsize=size, weight="bold")
+    ax.set_ylabel(ylabel, fontsize=size, weight="bold")
+    if kwargs.get('for_paper'):
+        plt.tick_params(axis='y', labelsize='large')
+        plt.tick_params(axis='x', labelsize='large')
+        #ticks = np.arange(0,1.01,.2)
+        #plt.xticks(ticks, labels=["%0.1f"%x for x in ticks])
+
+    plt.tight_layout()
+    if kwargs.get('forceplot') or not os.path.isfile(out_file):
+        print("Writing to %s" % (out_file))
+        plt.savefig(out_file)
+    else:
+        print("Already exists: %s Use --forceplot to overwrite" % (out_file))
+    #plt.show()
+    plt.close()
+
+
 def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax', 
         out_file=None, alg1="sinksource", alg2="localplus", **kwargs):
     # figure out which GO terms have the biggest difference for all species
@@ -445,15 +508,15 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
     goid_diffs = {}
     for taxon, goid in df_curr[['#taxon', '#goid']].values:
         if (taxon, goid) not in alg1_scores and goid not in alg2_scores:
-            if kwargs['verbose']:
+            if kwargs.get('verbose'):
                 print("WARNING: %s not in both %s and %s." % (goid, alg1, alg2))
             continue
         if (taxon, goid) not in alg1_scores:
-            if kwargs['verbose']:
+            if kwargs.get('verbose'):
                 print("WARNING: %s not in %s" % (goid, alg1))
             continue
         if (taxon, goid) not in alg2_scores:
-            if kwargs['verbose']:
+            if kwargs.get('verbose'):
                 print("WARNING: %s not in %s." % (goid, alg2))
             continue
         goid_diff = alg1_scores[(taxon, goid)] - alg2_scores[(taxon, goid)]
@@ -465,9 +528,12 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
     goid_taxon_num_ann = dict(zip(zip(df_alg2['#taxon'], df_alg2['#goid']), df_alg2['# test ann']))
     # also load the summary of the GO terms
     if kwargs.get('goid_names_file'):
-    #summary_file = "inputs/pos-neg/%s/pos-neg-10-summary-stats.tsv" % (curr_ev_codes)
+        #summary_file = "inputs/pos-neg/%s/pos-neg-10-summary-stats.tsv" % (curr_ev_codes)
+        print("reading %s" % (kwargs['goid_names_file']))
         df_summary = pd.read_csv(kwargs['goid_names_file'], sep='\t')
-        goid_names = dict(zip(df_summary['GO term'], df_summary['GO term name']))
+        # should be 'GO term' but is sometimes '#GO term'. This is a quick hack
+        first_col = df_summary.columns[0]
+        goid_names = dict(zip(df_summary[first_col], df_summary['GO term name']))
     else:
         goid_names = {g: '-' for t, g in goid_taxon_num_ann}
 
@@ -559,9 +625,10 @@ def change_width(ax, new_value, horiz=False):
 
 def load_ann_datasets(
         out_dir, dataset, input_dir, 
-        alg_settings, **kwargs):
-    sparse_ann_file = "%s/pos-ann.npz" % (out_dir)
-    sparse_ann_file_eval = "%s/eval-pos-ann.npz" % (out_dir)
+        alg_settings, pos_only=True, **kwargs):
+    pos = "pos-" if pos_only else ""
+    sparse_ann_file = "%s/%sann.npz" % (out_dir, pos)
+    sparse_ann_file_eval = "%s/eval-%sann.npz" % (out_dir, pos)
     if not kwargs.get('forcenet') and \
             os.path.isfile(sparse_ann_file):
         ann_obj = load_ann_obj(sparse_ann_file)
@@ -571,7 +638,7 @@ def load_ann_datasets(
     else:
         _, ann_obj, eval_ann_obj = run_eval_algs.setup_dataset(
                 dataset, input_dir, alg_settings, **kwargs)
-        store_ann_obj(ann_obj, sparse_ann_file, pos_only=True)
+        store_ann_obj(ann_obj, sparse_ann_file, pos_only=pos_only)
         if eval_ann_obj is not None:
             store_ann_obj(eval_ann_obj, sparse_ann_file_eval, pos_only=True)
         # now store them to a file
@@ -614,6 +681,11 @@ def setup_parser(parser=None):
             help="First algorithm for the scatterplot")
     group.add_argument('--alg2', default="localplus",
             help="Second alg for the scatterplot")
+    #group.add_argument('--pval-correction', default="BH",
+    #        help="Type of multiple-hypothesis correction to use. " + \
+    #        "Options: BH (Benjamini Hochberg), BF (Bonferroni). Default=BH")
+    group.add_argument('--compare-taxon-median', action='store_true', default=False,
+            help="Summarize the fmax scatterplot by taking the median for each taxon.")
     return parser
 
 
