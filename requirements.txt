@@ -4,13 +4,15 @@ scipy==1.3.0
 pandas==1.0.4
 # package to parse the GO OBO file
 obonet==0.2.5
+# python package to read yaml/config files
+pyyaml
 # progress bar
 tqdm
 # used for CV 
 sklearn
-# used to parse the config file
-pyyaml
 # used to compute AUPRC and AUROC
 rpy2
+# used for plotting
+seaborn
 # required for aptrank
 #cvxopt
