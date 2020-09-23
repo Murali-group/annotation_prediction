@@ -9,13 +9,6 @@ import numpy as np
 
 
 def setupInputs(run_obj):
-    # may need to make sure the inputs match
-    ## if there are more annotations than nodes in the network, then trim the extra pos/neg nodes
-    #num_nodes = self.P.shape[0] if self.weight_gmw is False else self.normalized_nets[0].shape[0]
-    #if len(self.prots) > num_nodes: 
-    #    positives = positives[np.where(positives < num_nodes)]
-    #    negatives = negatives[np.where(negatives < num_nodes)]
-
     # extract the variables out of the annotation object
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
     run_obj.goids = run_obj.ann_obj.goids
