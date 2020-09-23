@@ -1,12 +1,16 @@
-networkx==1.11
-numpy==1.15
-scipy==1.1.0
-pandas==0.23.1
+networkx==2.1
+numpy==1.17.2
+scipy==1.3.0
+pandas==1.0.4
 # package to parse the GO OBO file
-obonet==0.2.2
+obonet==0.2.5
 # progress bar
 tqdm
-# used for CV and to compute the AUPRC and AUROC 
+# used for CV 
 sklearn
+# used to parse the config file
+pyyaml
+# used to compute AUPRC and AUROC
+rpy2
 # required for aptrank
 #cvxopt
