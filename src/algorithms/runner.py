@@ -2,11 +2,13 @@
 import sys
 from collections import defaultdict
 #import src.setup_sparse_networks as setup
-import src.algorithms.alg_utils
+import src.algorithms.alg_utils as alg_utils
 import src.algorithms.fastsinksource_runner as fastsinksource
 import src.algorithms.sinksource_bounds_runner as ss_bounds
+import src.algorithms.local_runner as local
 import src.algorithms.genemania_runner as genemania
 import src.algorithms.apt_birg_rank_runner as birgrank
+import src.algorithms.async_rw_runner as async_rw
 #import src.algorithms.sinksource_bounds
 #from src.algorithms.aptrank_birgrank.birgrank import birgRank
 #import src.algorithms.aptrank_birgrank.run_birgrank as run_birgrank
@@ -21,12 +23,13 @@ LibMapper = {
     'fastsinksourceplus': fastsinksource,
     'sinksource_bounds': ss_bounds,
     'sinksourceplus_bounds': ss_bounds,
-    'local': fastsinksource,
-    'localplus': fastsinksource,
+    'local': local,
+    'localplus': local,
     'genemania': genemania,
     'genemaniaplus': genemania,
     'aptrank': birgrank,
     'birgrank': birgrank,
+    'async_rw': async_rw,
 }
 
 
@@ -87,6 +90,27 @@ class Runner(object):
     # if the method is not in Python and was called elsewhere (e.g., R), 
     # then parse the outputs of the method
     def setupOutputs(self, **kwargs):
+        if self.params.get('debug_scores'):
+            out_file = self.params.get('debug_scores_file', 
+                    "%sdebug-scores%s%s.txt" % (
+                        self.out_dir, self.params_str,
+                        self.kwargs.get('postfix','')) )
+            #print("Debugging scores. Writing/Appending to %s" % (out_file))
+            # use the number of target prots as the default, 
+            # since those are the ones for which scores will be stored
+            num_to_write = kwargs.get('num_pred_to_write', len(self.target_prots))
+            if (num_to_write > 1000 or num_to_write == -1) \
+                    and len(self.goids_to_run) > 10:
+                print("num_pred_to_write %s for %d terms too much output. Must be < 1000 and < 10, respectively" % (
+                    num_to_write, len(self.goids_to_run)))
+            else:
+                #for goid in self.goids_to_run:
+                #    scores = self.goid_scores[self.ann_obj.goid2idx[goid]]
+                alg_utils.write_output(
+                        self.goid_scores, self.goids_to_run, self.ann_obj.prots,
+                        out_file, num_pred_to_write=num_to_write, 
+                        goid2idx=self.ann_obj.goid2idx)
+
         return LibMapper[self.name].setupOutputs(self, **kwargs)
 
     # setup the params_str used in the output file

@@ -145,6 +145,7 @@ def runFastSinkSource(
     return s, process_time, wall_time, num_iters
 
 
+# this was replaced by the local_runner.
 def runLocal(P, positives, negatives=None):
     """
     Baseline method where each node's score is the average score of its neighbors.
