@@ -25,15 +25,6 @@ import src.utils.string_utils as string_utils
 import src.utils.ontology_utils as go_utils
 
 
-#class Alg_Runner:
-#    def __init__(self, net_version, exp_name, net_obj, ann_obj, runners, **kwargs):
-#    
-#        self.net_version = net_version
-#        self.exp_name = exp_name
-#        self.kwargs = kwargs
-#        self.verbose = kwargs.get('verbose', False) 
-#        self.forced = kwargs.get('forcealg', False) 
-
 
 def parse_args():
     parser = setup_opts()
@@ -44,9 +35,8 @@ def parse_args():
         config_map = yaml.load(conf)
     # TODO check to make sure the inputs are correct in config_map
 
-    #if opts.exp_name is None or opts.pos_neg_file is None:
-    #    print("--exp-name, --pos-neg-file, required")
-    #    sys.exit(1)
+    # store the option as 'compute_smin' since that seems more intuitive
+    kwargs['compute_smin'] = not kwargs['skip_smin']
 
     return config_map, kwargs
 
@@ -82,9 +72,13 @@ def setup_opts():
     group.add_argument('--write-prec-rec', action="store_true", default=False,
             help="Also write a file containing the precision and recall for every positive example. " + \
             "If a single term is given, only the prec-rec file, with the term in its name, will be written.")
-    group.add_argument('--early-prec', '-E', type=str, action="append", default=["k1"],
+    # TEMP: don't have a default
+    #group.add_argument('--early-prec', '-E', type=str, action="append", default=["k1"],
+    group.add_argument('--early-prec', '-E', type=str, action="append",
             help="Report the precision at the specified recall value (between 0 and 1). " + \
-            "If prefixed with 'k', for a given term, the precision at (k * # ann) # of nodes is given. Default: k1")
+            "If prefixed with 'k', for a given term, the precision at (k * # ann) # of nodes is given.")
+    group.add_argument('--skip-smin', action='store_true', default=False,
+            help="Skip computing the Smin which can use a lot of RAM to store all predictions")
 
     # additional parameters
     group = parser.add_argument_group('Additional options')
@@ -94,9 +88,6 @@ def setup_opts():
     group.add_argument('--factor-pred-to-write', '-N', type=float, 
             help="Write the predictions <factor>*num_pos for each term to file. " +
             "For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
-    # TODO finish adding this option
-    #group.add_argument('-T', '--ground-truth-file', type=str,
-    #                 help="File containing true annotations with which to evaluate predictions")
     group.add_argument('--postfix', type=str, 
             help="String to add to the end of the output file name(s)")
     group.add_argument('--forcealg', action="store_true", default=False,
@@ -116,7 +107,8 @@ def run(config_map, **kwargs):
     output_settings = config_map['output_settings']
     postfix = kwargs.get("postfix")
     # combine the evaluation settings in the config file and the kwargs
-    kwargs.update(config_map['eval_settings'])
+    if 'eval_settings' in config_map:
+        kwargs.update(config_map['eval_settings'])
     # if specified, use this postfix, meaning overwrite the postfix from the yaml file
     if postfix is not None:
         kwargs['postfix'] = postfix
@@ -158,9 +150,6 @@ def run(config_map, **kwargs):
             # use it to evaluate the predictions
             if eval_ann_obj is not None:
                 exp_type = "eval"
-                # For LOSO, 'all-sp-loso' was used in the past
-                #if kwargs.get('keep_ann') is not None:
-                #    exp_type="all-sp-loso" 
                 for run_obj in alg_runners:
                     out_file = "%s/%s%s%s.txt" % (
                         run_obj.out_dir, exp_type, run_obj.params_str, kwargs.get("postfix", ""))
@@ -382,8 +371,6 @@ def run_algs(alg_runners, **kwargs):
                 positives = (y > 0).nonzero()[1]
                 num_pred_to_write[run_obj.goids[i]] = len(positives) * kwargs['factor_pred_to_write']
         if num_pred_to_write != 0:
-            # TODO generate the output file paths in the runner object
-            #out_file = run_obj.out_file
             utils.checkDir(os.path.dirname(run_obj.out_file)) 
             alg_utils.write_output(run_obj.goid_scores, run_obj.ann_obj.goids, run_obj.ann_obj.prots,
                          run_obj.out_file, num_pred_to_write=num_pred_to_write)

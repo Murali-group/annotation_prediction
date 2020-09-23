@@ -45,6 +45,17 @@ def eval_loso(
         # -------------------------------
         alg_taxon_terms_to_skip = get_already_run_terms(alg_runners, **kwargs) 
 
+    if kwargs.get('compute_smin'):
+        # store all of the prediction scores for the pos/neg examples to compute the Smin
+        for run_obj in alg_runners:
+            run_obj.all_pos_neg_scores = sparse.csr_matrix(ann_obj.ann_matrix.shape)
+            # also store a version of the eval matrix with only the most specific terms per taxon
+            run_obj.eval_mat = sparse.csr_matrix(ann_obj.ann_matrix.shape)
+        if eval_ann_obj is not None:
+            term_ic_vec = eval_utils.compute_information_content(eval_ann_obj)
+        else:
+            term_ic_vec = eval_utils.compute_information_content(ann_obj)
+
     # now perform LOSO validation
     params_results = defaultdict(int)
     # for each species, leave out all of its annotations and then attempt to recover them
@@ -73,7 +84,7 @@ def eval_loso(
             alg = run_obj.name
             print("Alg: %s" % (alg))
 
-            if t in alg_taxon_terms_to_skip[alg]:  
+            if t in alg_taxon_terms_to_skip[alg] and not kwargs.get('compute_smin'):  
                 terms_to_skip = alg_taxon_terms_to_skip[alg][t]
                 sp_goterms = [t for t in sp_goterms if t not in terms_to_skip]
                 print("\t%d to run that aren't in the output file yet." % (len(sp_goterms)))
@@ -88,6 +99,11 @@ def eval_loso(
                 run_obj, ann_obj, 
                 train_ann_mat, test_ann_mat,
                 taxons=taxons, taxon=t, **kwargs)
+
+    if kwargs.get('compute_smin'):
+        for run_obj in alg_runners:
+            out_file = run_obj.out_pref + '-smin.tsv'
+            eval_utils.compute_smin(run_obj.all_pos_neg_scores, run_obj.eval_mat, term_ic_vec, out_file=out_file)
 
     # I'm not resetting the params_results in run_obj,
     # so those params_results were already appended to.
@@ -248,6 +264,11 @@ def run_and_eval_algs(
         taxon=taxon, append=True, **kwargs)
     for key in run_obj.params_results:
         params_results[key] += run_obj.params_results[key]
+
+    # storing all the scores can take a lot of RAM, so just compute if requested
+    if kwargs.get('compute_smin'):
+        run_obj.all_pos_neg_scores += eval_utils.store_pos_neg_scores(run_obj.goid_scores, test_ann_mat)
+        eval_utils.store_terms_eval_mat(run_obj, ann_obj, test_ann_mat, specific_terms=run_obj.goids_to_run)
 
     return params_results
 
