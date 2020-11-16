@@ -7,14 +7,16 @@ import os
 import sys
 from tqdm import tqdm
 import os
-import src.setup_sparse_networks as setup
-import src.algorithms.alg_utils as alg_utils
-import src.utils.file_utils as utils
-import src.utils.ontology_utils as go_utils
-import src.evaluate.eval_utils as eval_utils
 from tqdm import tqdm, trange
 import numpy as np
 from scipy import sparse
+
+# my local imports
+from .. import setup_sparse_networks as setup
+from ..algorithms import alg_utils
+from ..utils import file_utils as utils
+from ..utils import ontology_utils as ont_utils
+from . import eval_utils
 
 
 def eval_loso(
@@ -22,7 +24,7 @@ def eval_loso(
         taxons=None, only_taxon_file=None, **kwargs):
     """
     *alg_runners*: 
-        Each is expected to have the same ann_obj, prots, and goids
+        Each is expected to have the same ann_obj, prots, and terms
     *eval_ann_obj*: annotation object that will only be used for evaluation
     *taxon_file*: 
     *only_taxon_file*: 
@@ -38,10 +40,10 @@ def eval_loso(
             sys.exit(1)
         #print("\nRunning algs with all annotations in the --pos-neg-file and evaluating based on the annotations in the --pos-neg-file-eval.")
         #print("\tindividual species will be evaluated after")
-        print("\nEvaluating %d individual species, %d goterms, without leaving out any annotations for predictions." % (len(taxons), len(ann_obj.goids)))
+        print("\nEvaluating %d individual species, %d terms, without leaving out any annotations for predictions." % (len(taxons), len(ann_obj.terms)))
         #taxons = ['all']
     else:
-        print("Running the LOSO evaluation for %d species, %d goterms" % (len(taxons), len(ann_obj.goids)))
+        print("Running the LOSO evaluation for %d species, %d terms" % (len(taxons), len(ann_obj.terms)))
         # -------------------------------
         alg_taxon_terms_to_skip = get_already_run_terms(alg_runners, **kwargs) 
 
@@ -65,19 +67,19 @@ def eval_loso(
             t, selected_species[t]))
 
         # leave out the annotations for this taxon ID
-        train_ann_mat, test_ann_mat, sp_goterms = leave_out_taxon(
+        train_ann_mat, test_ann_mat, sp_terms = leave_out_taxon(
             t, ann_obj, species_to_uniprot_idx,
             eval_ann_obj=eval_ann_obj, 
             #terms_to_skip=alg_taxon_terms_to_skip[alg][t] if t in alg_taxon_terms_to_skip[alg] else None,
             **kwargs)
-        tqdm.write("\t%d/%d goterms with >= %d annotations" % (len(sp_goterms), len(ann_obj.goids), kwargs['num_test_cutoff']))
-        if len(sp_goterms) == 0:
+        tqdm.write("\t%d/%d terms with >= %d annotations" % (len(sp_terms), len(ann_obj.terms), kwargs['num_test_cutoff']))
+        if len(sp_terms) == 0:
             print("\tskipping")
             continue
         if kwargs.get('sp_leaf_terms_only'):
-            leaf_terms = go_utils.get_most_specific_terms(sp_goterms, ann_obj=ann_obj)
-            print("\t'sp_leaf_terms_only': %d / %d terms are most specific, or leaf terms" % (len(leaf_terms), len(sp_goterms)))
-            sp_goterms = leaf_terms 
+            leaf_terms = go_utils.get_most_specific_terms(sp_terms, ann_obj=ann_obj)
+            print("\t'sp_leaf_terms_only': %d / %d terms are most specific, or leaf terms" % (len(leaf_terms), len(sp_terms)))
+            sp_terms = leaf_terms 
 
         taxon_prots = species_to_uniprot_idx[t]
         for run_obj in alg_runners:
@@ -86,12 +88,12 @@ def eval_loso(
 
             if t in alg_taxon_terms_to_skip[alg] and not kwargs.get('compute_smin'):  
                 terms_to_skip = alg_taxon_terms_to_skip[alg][t]
-                sp_goterms = [t for t in sp_goterms if t not in terms_to_skip]
-                print("\t%d to run that aren't in the output file yet." % (len(sp_goterms)))
-                if len(sp_goterms) == 0:
+                sp_terms = [t for t in sp_terms if t not in terms_to_skip]
+                print("\t%d to run that aren't in the output file yet." % (len(sp_terms)))
+                if len(sp_terms) == 0:
                     continue
             # limit the run_obj to run on the terms for which there are annotations
-            run_obj.goids_to_run = sp_goterms
+            run_obj.terms_to_run = sp_terms
             # limit the scores stored to the current taxon's prots
             run_obj.target_prots = list(taxon_prots)
 
@@ -183,7 +185,7 @@ def get_already_run_terms(alg_runners, **kwargs):
         # if the output file already exists, skip the terms that are already there
         # unless --write-prec-rec is specified with a single term.
         # then only the full prec_rec file will be written
-        elif kwargs['write_prec_rec'] and len(kwargs['goterm']) == 1:
+        elif kwargs['write_prec_rec'] and len(kwargs['term']) == 1:
             pass
         elif os.path.isfile(out_file): 
             print("WARNING: %s results file already exists. Appending to it" % (out_file))
@@ -201,7 +203,7 @@ def run_and_eval_algs(
         run_obj, ann_obj,
         train_ann_mat, test_ann_mat,
         taxon=None, **kwargs):
-    goids, prots = ann_obj.goids, ann_obj.prots
+    terms, prots = ann_obj.terms, ann_obj.prots
     dag_matrix = ann_obj.dag_matrix
     params_results = defaultdict(int)
 
@@ -213,9 +215,9 @@ def run_and_eval_algs(
         print("Evaluating using only the ground-truth negatives predicted as positives as false positives")
 
     # change the annotation matrix to the current training positive examples
-    curr_ann_obj = setup.Sparse_Annotations(dag_matrix, train_ann_mat, goids, prots)
+    curr_ann_obj = setup.Sparse_Annotations(dag_matrix, train_ann_mat, terms, prots)
     # make an ann obj with the test ann mat
-    test_ann_obj = setup.Sparse_Annotations(dag_matrix, test_ann_mat, goids, prots)
+    test_ann_obj = setup.Sparse_Annotations(dag_matrix, test_ann_mat, terms, prots)
     # if this is a gene based method, then run it on only the nodes which have a pos/neg annotation
     # unless specified otherwise by the "run_all_nodes" flag
     if run_obj.get_alg_type() == 'gene-based' and not run_obj.kwargs.get("run_all_nodes"):
@@ -239,7 +241,7 @@ def run_and_eval_algs(
 
     # if predictions were already generated, and taxon is set to 'all', then use those.
     # otherwise, generate the prediction scores
-    if kwargs['keep_ann'] and run_obj.goid_scores.getnnz() != 0:
+    if kwargs['keep_ann'] and run_obj.term_scores.getnnz() != 0:
         print("Using already computed scores")
     else:
         # replace the ann_obj in the runner with the current training annotations  
@@ -256,7 +258,7 @@ def run_and_eval_algs(
         run_obj.setupOutputs(taxon=taxon)
 
     # now evaluate 
-    # this will write a file containing the fmax and other measures for each goterm 
+    # this will write a file containing the fmax and other measures for each term 
     # with the taxon name in the name of the file
     eval_utils.evaluate_ground_truth(
         run_obj, test_ann_obj, out_file,
@@ -267,22 +269,22 @@ def run_and_eval_algs(
 
     # storing all the scores can take a lot of RAM, so just compute if requested
     if kwargs.get('compute_smin'):
-        run_obj.all_pos_neg_scores += eval_utils.store_pos_neg_scores(run_obj.goid_scores, test_ann_mat)
-        eval_utils.store_terms_eval_mat(run_obj, ann_obj, test_ann_mat, specific_terms=run_obj.goids_to_run)
+        run_obj.all_pos_neg_scores += eval_utils.store_pos_neg_scores(run_obj.term_scores, test_ann_mat)
+        eval_utils.store_terms_eval_mat(run_obj, ann_obj, test_ann_mat, specific_terms=run_obj.terms_to_run)
 
     return params_results
 
 
 def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
                     eval_ann_obj=None, keep_ann=False, 
-                    non_pos_as_neg_eval=False, eval_goterms_with_left_out_only=False,
+                    non_pos_as_neg_eval=False, eval_terms_with_left_out_only=False,
                     oracle=False, num_test_cutoff=10, **kwargs):
     """
     Training positives are removed from testing positives, and train pos and neg are removed from test neg
         I don't remove training negatives from testing positives, because not all algorithms use negatives
     *t*: species to be left out. If t is None or 'all', then no species will be left out, and keep_ann must be True.
     *eval_ann_obj*: 
-    *eval_goterms_with_left_out_only*: if eval_ann_obj is given and keep_ann is False, 
+    *eval_terms_with_left_out_only*: if eval_ann_obj is given and keep_ann is False, 
         only evaluate GO terms that have at least 2% of annotations. 
         Useful to speed-up processing for term-based algorithms
     *oracle*: remove train negatives that are actually test positives
@@ -292,13 +294,13 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
         t = None
     # leave this taxon out by removing its annotations
     # rather than a dictionary, build a matrix
-    ann_matrix, goids, prots = ann_obj.ann_matrix, ann_obj.goids, ann_obj.prots
+    ann_matrix, terms, prots = ann_obj.ann_matrix, ann_obj.terms, ann_obj.prots
     train_ann_mat = sparse.lil_matrix(ann_matrix.shape, dtype=np.float)
     test_ann_mat = sparse.lil_matrix(ann_matrix.shape, dtype=np.float)
-    sp_goterms = []
+    sp_terms = []
     #skipped_eval_no_left_out_ann = 0
-    for idx, goid in enumerate(goids):
-        pos, neg = alg_utils.get_goid_pos_neg(ann_matrix, idx)
+    for idx, term in enumerate(terms):
+        pos, neg = alg_utils.get_term_pos_neg(ann_matrix, idx)
         ann_pos = set(list(pos))
         ann_neg = set(list(neg))
         # first setup the training annotations (those used as positives/negatives for the algorithm)
@@ -312,14 +314,14 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
         eval_neg = ann_neg.copy()
         # setup the testing annotations (those used when evaluating the performance)
         if eval_ann_obj is not None:
-            if goid not in eval_ann_obj.goid2idx:
+            if term not in eval_ann_obj.term2idx:
                 eval_pos, eval_neg = set(), set()
             else:
-                eval_pos, eval_neg = alg_utils.get_goid_pos_neg(eval_ann_obj.ann_matrix, eval_ann_obj.goid2idx[goid])
+                eval_pos, eval_neg = alg_utils.get_term_pos_neg(eval_ann_obj.ann_matrix, eval_ann_obj.term2idx[term])
                 eval_pos = set(list(eval_pos))
                 eval_neg = set(list(eval_neg))
             # if this species has little-to-no annotations that are being left-out, then we can skip it
-            #if not keep_ann and eval_goterms_with_left_out_only:
+            #if not keep_ann and eval_terms_with_left_out_only:
                 ## If the percentage of left-out ann is less than 2%, then skip it
                 #if (len(ann_pos) - len(train_pos)) / float(len(train_pos)) < .02:
                 #    skipped_eval_no_left_out_ann += 1 
@@ -344,7 +346,7 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
         if oracle:
             train_neg -= test_pos
         test_neg -= train_pos | train_neg 
-        # build an array of the scores and set it in the goid sparse matrix of scores
+        # build an array of the scores and set it in the term sparse matrix of scores
         # UPDATE 2019-07: Some algorithms are node-based and could benefit from the extra annotations
         pos_neg_arr = np.zeros(len(prots))
         pos_neg_arr[list(train_pos)] = 1
@@ -358,12 +360,12 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
         if len(train_pos) < num_test_cutoff or len(test_pos) < num_test_cutoff or \
            (len(train_neg) == 0 or len(test_neg) == 0):
             continue
-        sp_goterms.append(goid) 
+        sp_terms.append(term) 
 
-    #if eval_ann_matrix is not None and not keep_ann and eval_goterms_with_left_out_only:
-    #    print("\t%d goterms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
+    #if eval_ann_matrix is not None and not keep_ann and eval_terms_with_left_out_only:
+    #    print("\t%d terms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
 
-    return train_ann_mat.tocsr(), test_ann_mat.tocsr(), sp_goterms
+    return train_ann_mat.tocsr(), test_ann_mat.tocsr(), sp_terms
 
 
 def split_ann_mat_train_test(
@@ -374,7 +376,7 @@ def split_ann_mat_train_test(
     *eval_ann_obj*: annotation matrix from which to get the test ann matrix
     *num_test_cutoff*: minimum number of annotations for training and for testing for each term 
     """
-    ann_matrix, goids = ann_obj.ann_matrix, ann_obj.goids
+    ann_matrix, terms = ann_obj.ann_matrix, ann_obj.terms
 
     # get the annotations of only the test prots
     # by multiplying a diagonal matrix with 1s at the test prot indexes
@@ -385,12 +387,12 @@ def split_ann_mat_train_test(
 
     # if a different set of annotations will be used for evaluating, then extract those as the test_mat
     if eval_ann_obj is not None:
-        # need to re-align the test mat so the goids match the train mat
+        # need to re-align the test mat so the terms match the train mat
         test_mat = eval_ann_obj.ann_matrix.dot(diag)
-        if len(ann_obj.goids) != len(eval_ann_obj.goids):
+        if len(ann_obj.terms) != len(eval_ann_obj.terms):
             new_test_mat = sparse.lil_matrix(test_mat.shape)
-            for i, goid in enumerate(ann_obj.goids):
-                i2 = eval_ann_obj.goid2idx.get(goid)
+            for i, term in enumerate(ann_obj.terms):
+                i2 = eval_ann_obj.term2idx.get(term)
                 if i2 is None:
                     continue
                 new_test_mat[i] = test_mat[i2]
@@ -401,19 +403,19 @@ def split_ann_mat_train_test(
     num_train_neg_per_term = (train_mat < 0).sum(axis=1)
     num_test_pos_per_term = (test_mat > 0).sum(axis=1)
     num_test_neg_per_term = (test_mat < 0).sum(axis=1)
-    goterms_passing_cutoff = []
+    terms_passing_cutoff = []
     for i in range(ann_matrix.shape[0]):
         # UPDATE 2018-10: Add a cutoff on both the # of training positive and # of test pos
         if num_train_pos_per_term[i] < num_test_cutoff or \
            num_test_pos_per_term[i] < num_test_cutoff or \
            (num_train_neg_per_term[i] == 0 or num_test_neg_per_term[i] == 0):
             continue
-        goterms_passing_cutoff.append(goids[i])
+        terms_passing_cutoff.append(terms[i])
 
-    #if eval_ann_matrix is not None and not keep_ann and eval_goterms_with_left_out_only:
-    #    print("\t%d goterms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
+    #if eval_ann_matrix is not None and not keep_ann and eval_terms_with_left_out_only:
+    #    print("\t%d terms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
 
-    return train_mat, test_mat, goterms_passing_cutoff
+    return train_mat, test_mat, terms_passing_cutoff
 
 
 def write_stats_file(alg_runners, params_results, **kwargs):

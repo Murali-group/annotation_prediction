@@ -1,12 +1,12 @@
 # Python implementation of SinkSource
 
 import time
-import src.algorithms.alg_utils as alg_utils
 import numpy as np
 from scipy.sparse import csr_matrix, eye
 from scipy.sparse import linalg
 from tqdm import tqdm
 import sys
+from . import alg_utils
 
 
 def FastSinkSource(P, f, max_iters=1000, eps=0.0001, a=0.8, verbose=False):
@@ -59,9 +59,9 @@ def runFastSinkSource(
     """
     *P*: Network as a scipy sparse matrix. Should already be normalized
     *positives*: numpy array of node ids to be used as positives
-    *negeatives*: numpy array of node ids to be used as negatives. 
-        If not given, will be run as SinkSourcePlus. 
-        For SinkSourcePlus, if the lambda parameter is desired, it should already have been included in the graph normalization process. 
+    *negatives*: numpy array of node ids to be used as negatives. 
+        If not given, will be run as FastSinkSourcePlus. 
+        For FastSinkSourcePlus, if the lambda parameter is desired, it should already have been included in the graph normalization process. 
         See the function normalizeGraphEdgeWeights in alg_utils.py 
     *max_iters*: max # of iterations to run SinkSource. 
         If 0, use spsolve to solve the equation directly 
@@ -75,7 +75,6 @@ def runFastSinkSource(
     newP, f, = alg_utils.setup_fixed_scores(
         P, positives, negatives, a=a, remove_nonreachable=False)
 
-    #if max_iters > 0:
     if solver is None:
         s, process_time, wall_time, num_iters = FastSinkSource(
             newP, f, max_iters=max_iters, eps=eps, a=a, verbose=verbose)
@@ -130,15 +129,6 @@ def runFastSinkSource(
                 "iters: %d, max_iters: %d, info: %s" % (
                     num_iters, 1000, info) if solver != 'spsolve' else ''))
 
-    #sys.exit()
-    # map back from the indices after deleting pos/neg to the original indices
-    ## the positives will be left as 1, and the rest of the unknown examples will get their score below
-    #scores_arr = np.ones(num_nodes)
-    ## leave the negative examples at 0
-    #if negatives is not None:
-    #    scores_arr[negatives] = 0
-    #indices = [idx2node[n] for n in range(len(s))]
-    #scores_arr[indices] = s
     # keep the positive examples at 1
     s[positives] = 1
 
@@ -152,7 +142,7 @@ def runLocal(P, positives, negatives=None):
         Essentially one iteration of SinkSource.
     *P*: Network as a scipy sparse matrix. Should already be normalized
     *positives*: numpy array of node ids to be used as positives
-    *negeatives*: numpy array of node ids to be used as negatives. 
+    *negatives*: numpy array of node ids to be used as negatives. 
         If not given, will be run as "LocalPlus". 
     """
     f = np.zeros(P.shape[0])

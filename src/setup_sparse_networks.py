@@ -5,17 +5,6 @@
 
 from collections import defaultdict
 import os, sys, time
-from optparse import OptionParser, OptionGroup
-#import src.version_settings as v_settings
-import src.utils.file_utils as utils
-from src.utils.string_utils import full_column_names, \
-    STRING_NETWORKS, NON_TRANSFERRED_STRING_NETWORKS, \
-    CORE_STRING_NETWORKS
-import src.algorithms.alg_utils as alg_utils
-import src.go_term_prediction_examples.go_term_prediction_examples as go_examples
-from src.weight_networks.findKernelWeights import findKernelWeights
-from src.weight_networks.combineNetworksSWSN import combineNetworksSWSN
-from networkx.algorithms.dag import descendants
 import networkx as nx
 import numpy as np
 from scipy.io import savemat, loadmat
@@ -27,6 +16,14 @@ import gzip
 # Ignore it for now
 import warnings
 warnings.simplefilter('ignore', RuntimeWarning)
+available_weight_methods = ['swsn', 'gmw', 'gmw2008', 'add']
+
+# my local imports
+from .utils import file_utils as utils
+from .utils.string_utils import full_column_names, STRING_NETWORKS
+from .algorithms import alg_utils as alg_utils
+from .weight_networks.findKernelWeights import findKernelWeights
+from .weight_networks.combineNetworksSWSN import combineNetworksSWSN
 
 
 class Sparse_Networks:
@@ -34,10 +31,12 @@ class Sparse_Networks:
     An object to hold the sparse network (or sparse networks if they are to be joined later), 
         the list of nodes giving the index of each node, and a mapping from node name to index
     *sparse_networks*: either a list of scipy sparse matrices, or a single sparse matrix
+        If a list is given, then the sparse matrices must be aligned (i.e., nodes and indexes match)
     *weight_method*: method to combine the networks if multiple sparse networks are given.
-        Possible values: 'swsn', or 'gmw'
+        Possible values: 'swsn', 'gmw', or 'add'
         'swsn': Simultaneous Weighting with Specific Negatives (all terms)
-        'gmw': GeneMANIA Weighting (term-by-term). Also called gm2008
+        'gmw': GeneMANIA Weighting (term-by-term). May also be called gm2008
+        'add': Simply add the networks together
     *unweighted*: set the edge weights to 1 for all given networks.
     *term_weights*: a dictionary of tuples containing the weights and indices to use for each term.
         Would be used instead of running 'gmw'
@@ -62,12 +61,19 @@ class Sparse_Networks:
         self.verbose = verbose
         # make sure the values are correct
         if self.multi_net is True:
+            if weight_method.lower() not in available_weight_methods:
+                print("ERROR: weight_method '%s' not recognized. Available options: '%s'.\nQuitting" % (
+                    "', '".join(available_weight_methods)))
+                sys.exit()
             self.weight_swsn = True if weight_method.lower() == 'swsn' else False
             self.weight_gmw = True if weight_method.lower() in ['gmw', 'gm2008'] else False
-            num_weight_methods = sum([self.weight_swsn, self.weight_gmw])
-            if num_weight_methods == 0 or num_weight_methods > 1:
-                raise("must specify exactly one method to combine networks when multiple networks are passed in. Given method: '%s'" % (weight_method))
-            self.term_weights = term_weights
+            self.term_weights = term_weights  # extra setting for gmw
+            # if specified, just add them together
+            if weight_method.lower() == "add":
+                self.W = sparse_networks[0]
+                for W in sparse_networks[1:]:
+                    self.W += W
+                self.multi_net = False
         else:
             self.weight_swsn = False
             self.weight_gmw = False
@@ -115,13 +121,13 @@ class Sparse_Networks:
             combined_network += w*self.normalized_nets[i] 
         return combined_network
 
-    def weight_GMW(self, y, goid=None):
-        if self.term_weights and goid in self.term_weights:
-            weights = self.term_weights[goid]
+    def weight_GMW(self, y, term=None):
+        if self.term_weights and term in self.term_weights:
+            weights = self.term_weights[term]
             W = self.combine_using_weights(weights)
             process_time = 0
         else:
-            W, process_time, weights = weight_GMW(y, self.normalized_nets, self.net_names, goid=goid) 
+            W, process_time, weights = weight_GMW(y, self.normalized_nets, self.net_names, term=term) 
         return W, process_time, weights
 
     def save_net(self, out_file):
@@ -149,12 +155,12 @@ class Sparse_Annotations:
         the list of GO term IDs giving the index of each term, and a mapping from term to index
     """
     # TODO add the DAG matrix
-    def __init__(self, dag_matrix, ann_matrix, goids, prots):
+    def __init__(self, dag_matrix, ann_matrix, terms, prots):
         self.dag_matrix = dag_matrix
         self.ann_matrix = ann_matrix
-        self.goids = goids
-        # used to map from index to goid and vice versa
-        self.goid2idx = {g: i for i, g in enumerate(goids)}
+        self.terms = terms
+        # used to map from index to term and vice versa
+        self.term2idx = {g: i for i, g in enumerate(terms)}
         self.prots = prots
         # used to map from node/prot to the index and vice versa
         self.node2idx = {n: i for i, n in enumerate(prots)}
@@ -164,10 +170,10 @@ class Sparse_Annotations:
         #    self.add_eval_ann_matrix(pos_neg_file_eval)
 
     #def add_eval_ann_matrix(self, pos_neg_file_eval):
-    #    self.ann_matrix, self.goids, self.eval_ann_matrix = setup_eval_ann(
-    #        pos_neg_file_eval, self.ann_matrix, self.goids, self.prots)
-    #    # update the goid2idx mapping
-    #    self.goid2idx = {g: i for i, g in enumerate(self.goids)}
+    #    self.ann_matrix, self.terms, self.eval_ann_matrix = setup_eval_ann(
+    #        pos_neg_file_eval, self.ann_matrix, self.terms, self.prots)
+    #    # update the term2idx mapping
+    #    self.term2idx = {g: i for i, g in enumerate(self.terms)}
 
     def reshape_to_prots(self, new_prots):
         """ *new_prots*: list of prots to which the cols should be changed (for example, to align to a network)
@@ -191,10 +197,10 @@ class Sparse_Annotations:
     def limit_to_terms(self, terms_list):
         """ *terms_list*: list of terms. Data from rows not in this list of terms will be removed
         """
-        terms_idx = [self.goid2idx[t] for t in terms_list if t in self.goid2idx]
-        print("\tlimiting data in annotation matrix from %d terms to %d" % (len(self.goids), len(terms_idx)))
+        terms_idx = [self.term2idx[t] for t in terms_list if t in self.term2idx]
+        print("\tlimiting data in annotation matrix from %d terms to %d" % (len(self.terms), len(terms_idx)))
         num_pos = len((self.ann_matrix > 0).astype(int).data)
-        terms = np.zeros(len(self.goids))
+        terms = np.zeros(len(self.terms))
         terms[terms_idx] = 1
         diag = sp.diags(terms)
         self.ann_matrix = diag.dot(self.ann_matrix)
@@ -208,22 +214,22 @@ class Sparse_Annotations:
         """
         assert len(terms_list) == dag_mat.shape[0], \
             "ERROR: # terms given to reshape != the shape of the given dag matrix"
-        if len(terms_list) < len(self.goids):
+        if len(terms_list) < len(self.terms):
             # remove the extra data first to speed up indexing
             self.limit_to_terms(terms_list)
         # now move each row to the correct position in the new matrix
         new_ann_mat = sp.lil_matrix((len(terms_list), len(self.prots)))
-        #terms_idx = [self.goid2idx[t] for t in terms_list if t in self.goid2idx]
+        #terms_idx = [self.term2idx[t] for t in terms_list if t in self.term2idx]
         for idx, term in enumerate(terms_list):
-            idx2 = self.goid2idx.get(term)
+            idx2 = self.term2idx.get(term)
             if idx2 is None:
                 continue
             new_ann_mat[idx] = self.ann_matrix[idx2]
             #new_dag_mat[idx] = self.dag_matrix[idx2][:,terms_idx]
         self.ann_matrix = new_ann_mat.tocsr()
         self.dag_matrix = dag_mat.tocsr()
-        self.goids = terms_list
-        self.goid2idx = {g: i for i, g in enumerate(self.goids)}
+        self.terms = terms_list
+        self.term2idx = {g: i for i, g in enumerate(self.terms)}
 
     def limit_to_prots(self, prots):
         """ *prots*: array with 1s at selected prots, 0s at other indices
@@ -231,6 +237,22 @@ class Sparse_Annotations:
         diag = sp.diags(prots)
         self.ann_matrix = self.ann_matrix.dot(diag)
 
+
+def get_net_out_str(net_files=None, string_net_files=None, string_nets=None):
+    #num_networks = len(net_files) + len(string_nets)
+    net_files_str = '-'.join(os.path.basename(f).split('.')[0] for f in net_files)+'-' \
+                    if net_files is not None and len(net_files) > 0 else ""
+    # if there is only 1 string network, then write the name instead of the number
+    string_nets_str = "" 
+    if string_net_files is not None and len(string_net_files) > 0 and \
+       string_nets is not None:
+        if len(string_nets) == 1:
+            string_nets_str = list(string_nets)[0] + '-'
+        elif len(string_nets) > 1:
+            string_nets_str = "string%d-" % (len(string_nets)) 
+
+    net_str = net_files_str + string_nets_str
+    return net_str
 
 def permute_sparse_matrix(M, new_row_order=None, new_col_order=None):
     """
@@ -277,7 +299,18 @@ def propagate_ann_up_dag(pos_mat, dag_matrix):
 
 def create_sparse_net_file(
         out_pref, net_files=[], string_net_files=[], 
-        string_nets=STRING_NETWORKS, string_cutoff=None, forcenet=False):
+        string_nets=STRING_NETWORKS, string_cutoff=None,
+        add_net_out_str=False, forcenet=False):
+    """
+    Wrapper around setup_sparse_networks function that reads/writes to file
+    *net_files*: list of paths to regular edge-list network file
+    *string_net_files*: List of string files containing all 14 STRING network columns
+    *string_nets*: List of STRING network column names for which to make a sparse matrix.
+    *string_cutoff*: Cutoff to use for the STRING combined network column (last)
+
+    *returns*: List of sparse networks, list of network names,
+        list of proteins in the order they're in in the sparse networks
+    """
     if net_files is None:
         net_files = []
     # if there aren't any string net files, then set the string nets to empty
@@ -287,15 +320,14 @@ def create_sparse_net_file(
     elif string_nets is None:
         string_nets = STRING_NETWORKS
     string_nets = list(string_nets)
-    num_networks = len(net_files) + len(string_nets)
-    # if there is only 1 string network, then write the name instead of the number
-    if len(string_nets) == 1:
-        num_networks = list(string_nets)[0] 
-    sparse_nets_file = "%s%s-sparse-nets.mat" % (out_pref, num_networks)
+    if add_net_out_str:
+        net_str = get_net_out_str(net_files, string_net_files, string_nets)
+        out_pref += net_str
+    sparse_nets_file = "%ssparse-nets.mat" % (out_pref)
     # the node IDs should be the same for each of the networks,
     # so no need to include the # in the ids file
     node_ids_file = "%snode-ids.txt" % (out_pref)
-    net_names_file = "%s%s-net-names.txt" % (out_pref, num_networks)
+    net_names_file = "%snet-names.txt" % (out_pref)
     if forcenet is False \
        and os.path.isfile(sparse_nets_file) and os.path.isfile(node_ids_file) \
        and os.path.isfile(net_names_file):
@@ -373,7 +405,8 @@ def setup_sparse_networks(net_files=[], string_net_files=[], string_nets=[], str
                     continue
                 #u,v,w = line.rstrip().split('\t')[:3]
                 line = line.rstrip().split('\t')
-                u,v,w = line[:3]
+                u,v = line[:2]
+                w = line[2] if len(line) > 2 else 1
                 G.add_edge(u,v,**{name:float(w)})
 
     network_names += string_nets
@@ -460,13 +493,13 @@ def create_sparse_ann_and_align_to_net(
         loaded_data = np.load(sparse_ann_file, allow_pickle=True)
         dag_matrix = make_csr_from_components(loaded_data['arr_0'])
         ann_matrix = make_csr_from_components(loaded_data['arr_1'])
-        goids, prots = loaded_data['arr_2'], loaded_data['arr_3']
-        ann_obj = Sparse_Annotations(dag_matrix, ann_matrix, goids, prots)
+        terms, prots = loaded_data['arr_2'], loaded_data['arr_3']
+        ann_obj = Sparse_Annotations(dag_matrix, ann_matrix, terms, prots)
     else:
-        dag_matrix, ann_matrix, goids, ann_prots = create_sparse_ann_file(
+        dag_matrix, ann_matrix, terms, ann_prots = create_sparse_ann_file(
                 obo_file, pos_neg_file, **kwargs)
-        #ann_matrix, goids = setup.setup_sparse_annotations(pos_neg_file, selected_terms, prots)
-        ann_obj = Sparse_Annotations(dag_matrix, ann_matrix, goids, ann_prots)
+        #ann_matrix, terms = setup.setup_sparse_annotations(pos_neg_file, selected_terms, prots)
+        ann_obj = Sparse_Annotations(dag_matrix, ann_matrix, terms, ann_prots)
         # so that limiting the terms won't make a difference, apply youngs_neg here
         if kwargs.get('youngs_neg'):
             ann_obj = youngs_neg(ann_obj, **kwargs)
@@ -480,7 +513,7 @@ def create_sparse_ann_and_align_to_net(
         ann_matrix_data = get_csr_components(ann_obj.ann_matrix)
         np.savez_compressed(
             sparse_ann_file, dag_matrix_data, 
-            ann_matrix_data, ann_obj.goids, ann_obj.prots)
+            ann_matrix_data, ann_obj.terms, ann_obj.prots)
     return ann_obj
 
 
@@ -488,156 +521,136 @@ def create_sparse_ann_file(
         obo_file, pos_neg_file, 
         forced=False, verbose=False, **kwargs):
     """
-    Store/load the DAG, annotation matrix, goids and prots. 
+    Store/load the DAG, annotation matrix, terms and prots. 
     The DAG and annotation matrix will be aligned, and the prots will not be limitted to a network since the network can change.
     The DAG should be the same DAG that was used to generate the pos_neg_file
     *returns*:
         1) dag_matrix: A term by term matrix with the child -> parent relationships
-        2) ann_matrix: A matrix with goterm rows, protein/node columns, and 1,0,-1 for pos,unk,neg values
-        3) goterms: row labels
+        2) ann_matrix: A matrix with term rows, protein/node columns, and 1,0,-1 for pos,unk,neg values
+        3) terms: row labels
         4) prots: column labels
     """
     sparse_ann_file = pos_neg_file + '.npz'
 
     if forced or not os.path.isfile(sparse_ann_file):
         # load the pos_neg_file first. Should have only one hierarchy (e.g., BP)
-        ann_matrix, goids, prots = setup_sparse_annotations(pos_neg_file)
+        ann_matrix, terms, prots = setup_sparse_annotations(pos_neg_file)
 
         # now read the term hierarchy DAG
-        # parse the go_dags first as it also sets up the goid_to_category dictionary
-        dag_matrix, dag_goids = setup_obo_dag_matrix(obo_file, goids)
-        dag_goids2idx = {g: i for i, g in enumerate(dag_goids)}
+        # parse the go_dags first as it also sets up the term_to_category dictionary
+        dag_matrix, dag_terms = setup_obo_dag_matrix(obo_file, terms)
+        dag_terms2idx = {g: i for i, g in enumerate(dag_terms)}
         # realign the terms in the dag_matrix to the terms in the annotation matrix
         # much faster than the other way around, since the DAG matrix is much smaller and sparser
         print("\taligning the DAG matrix (%d terms) and the ann_matrix (%d terms)" % (
             dag_matrix.shape[0], ann_matrix.shape[0]))
-        # TODO for some reason this isn't working. 
-        # The DAG is getting messed up (get_most_specific_ann is taking way too many iterations)
-        #new_dag_mat = sp.lil_matrix(dag_matrix.shape)
-        #for i, goid in enumerate(goids):
-        #    new_dag_mat[i] = dag_matrix[dag_goids2idx[goid]]
-        ## now add the leftover terms in the dag matrix
-        #idx = len(goids)
-        #for goid in set(dag_goids) - set(goids):
-        #    new_dag_mat[idx] = dag_matrix[dag_goids2idx[goid]]
-        #    goids.append(goid)
-        #    idx += 1
-        #dag_matrix = new_dag_mat.tocsr()
-        ## add extra rows to the bottom of the matrix to match the size of the DAG
-        #ann_matrix.resize((len(goids), len(prots)))
-        #ann_matrix = ann_matrix.tocsr()
-        #assert ann_matrix.shape[0] == dag_matrix.shape[0], \
-        #        "Ann and DAG matrices do not have the same # terms"
-        ann_matrix = alg_utils.align_mat(ann_matrix, (dag_matrix.shape[0], ann_matrix.shape[1]), goids, dag_goids2idx, verbose=verbose)
-        goids = dag_goids
+        ann_matrix = alg_utils.align_mat(ann_matrix, (dag_matrix.shape[0], ann_matrix.shape[1]), terms, dag_terms2idx, verbose=verbose)
+        terms = dag_terms
 
         print("\twriting sparse annotations to %s" % (sparse_ann_file))
         # store all the data in the same file
         dag_matrix_data = get_csr_components(dag_matrix)
         ann_matrix_data = get_csr_components(ann_matrix)
-        #np.savez_compressed(
-        #    sparse_ann_file, dag_matrix_data=dag_matrix_data, 
-        #    ann_matrix_data=ann_matrix_data, goids=goids, prots=prots)
         np.savez_compressed(
             sparse_ann_file, dag_matrix_data, 
-            ann_matrix_data, goids, prots)
+            ann_matrix_data, terms, prots)
     else:
         print("\nReading annotation matrix from %s" % (sparse_ann_file))
         loaded_data = np.load(sparse_ann_file, allow_pickle=True)
         dag_matrix = make_csr_from_components(loaded_data['arr_0'])
         ann_matrix = make_csr_from_components(loaded_data['arr_1'])
-        goids, prots = loaded_data['arr_2'], loaded_data['arr_3']
+        terms, prots = loaded_data['arr_2'], loaded_data['arr_3']
         #dag_matrix = make_csr_from_components(loaded_data['dag_matrix_data'])
         #ann_matrix = make_csr_from_components(loaded_data['ann_matrix_data'])
-        #goids, prots = loaded_data['goids'], loaded_data['prots']
+        #terms, prots = loaded_data['terms'], loaded_data['prots']
 
-    return dag_matrix, ann_matrix, goids, prots
+    return dag_matrix, ann_matrix, terms, prots
 
 
-def setup_obo_dag_matrix(obo_file, goterms):
+def setup_obo_dag_matrix(obo_file, terms):
     """
-    *goterms*: if a set of goterms are given, then limit the dag to 
+    *terms*: if a set of terms are given, then limit the dag to 
         the sub-ontology which has the given terms. Currently just returns the DAG for the first term. 
         TODO allow for multiple
     """
     go_dags = go_examples.parse_obo_file_and_build_dags(obo_file)
     dag_matrix = None
     for h, dag in go_dags.items():
-        t = list(goterms)[0]
+        t = list(terms)[0]
         if not dag.has_node(t):
             continue
-        dag_matrix, goids = build_hierarchy_matrix(dag, goterms, h=h)
+        dag_matrix, terms = build_hierarchy_matrix(dag, terms, h=h)
     if dag_matrix is None:
         print("ERROR: term %s not found in any of the sub-ontologies" % (t))
         sys.exit("Quitting")
     else:
-        return dag_matrix, goids
+        return dag_matrix, terms
 
 
-def build_hierarchy_matrix(go_dag, goids, h=None):
+def build_hierarchy_matrix(go_dag, terms, h=None):
     """
-    *goids*: the leaf terms to use to get a sub-graph of the DAG.
+    *terms*: the leaf terms to use to get a sub-graph of the DAG.
         All ancestor terms will be included in the DAG
     """
 
     # UPDATE: limit to only the GO terms in R
-    print("Limiting DAG to only the %d %s GO terms that have at least 1 annotation (assuming annotations already propagated up the DAG)" % (len(goids), h))
-    ancestor_goids = set()
-    for goid in goids:
-        # if we already have the ancestors of this goid, then skip
-        if goid in ancestor_goids:
+    print("Limiting DAG to only the %d %s GO terms that have at least 1 annotation (assuming annotations already propagated up the DAG)" % (len(terms), h))
+    ancestor_terms = set()
+    for term in terms:
+        # if we already have the ancestors of this term, then skip
+        if term in ancestor_terms:
             continue
-        ancestor_goids.update(descendants(go_dag, goid))
-    ancestor_goids.update(goids)
-    goids_list = sorted(ancestor_goids)
+        ancestor_terms.update(descendants(go_dag, term))
+    ancestor_terms.update(terms)
+    terms_list = sorted(ancestor_terms)
 
-    G = nx.subgraph(go_dag, ancestor_goids)
+    G = nx.subgraph(go_dag, ancestor_terms)
     if h is not None:
         print("\t%s DAG has %d nodes and %d edges" % (h, G.number_of_nodes(), G.number_of_edges()))
     else:
         print("\thierarchy DAG has %d nodes and %d edges" % (h, G.number_of_nodes(), G.number_of_edges()))
 
-    # convert the GO DAG to a sparse matrix, while maintaining the order of goids so it matches with the annotation matrix
-    dag_matrix = nx.to_scipy_sparse_matrix(G, nodelist=goids_list, weight=None)
+    # convert the GO DAG to a sparse matrix, while maintaining the order of terms so it matches with the annotation matrix
+    dag_matrix = nx.to_scipy_sparse_matrix(G, nodelist=terms_list, weight=None)
 
-    return dag_matrix, goids_list
+    return dag_matrix, terms_list
 
 
 def setup_sparse_annotations(pos_neg_file):
     """
     
-    *returns*: 1) A matrix with goterm rows, protein/node columns, and 1,0,-1 for pos,unk,neg values
-        2) List of goterms in the order in which they appear in the matrix
+    *returns*: 1) A matrix with term rows, protein/node columns, and 1,0,-1 for pos,unk,neg values
+        2) List of terms in the order in which they appear in the matrix
         3) List of prots in the order in which they appear in the matrix
     """
     print("\nSetting up annotation matrix")
 
     print("Reading positive and negative annotations for each protein from %s" % (pos_neg_file))
     if '-list' in pos_neg_file:
-        ann_matrix, goids, prots = read_pos_neg_list_file(pos_neg_file) 
+        ann_matrix, terms, prots = read_pos_neg_list_file(pos_neg_file) 
     else:
-        ann_matrix, goids, prots = read_pos_neg_table_file(pos_neg_file) 
+        ann_matrix, terms, prots = read_pos_neg_table_file(pos_neg_file) 
     num_pos = len((ann_matrix > 0).astype(int).data)
     num_neg = len(ann_matrix.data) - num_pos
     print("\t%d terms, %d prots, %d annotations. %d positives, %d negatives" % (
         ann_matrix.shape[0], ann_matrix.shape[1], len(ann_matrix.data), num_pos, num_neg))
 
-    return ann_matrix, goids, prots
+    return ann_matrix, terms, prots
 
 
 def read_pos_neg_table_file(pos_neg_file):
     """
     Reads a tab-delimited file with prots on rows, terms on columns, and 0,1,-1 as values
-    *returns*: 1) A matrix with goterm rows, protein/node columns, and 1,0,-1 for pos,unk,neg values
-        2) List of goterms in the order in which they appear in the matrix
+    *returns*: 1) A matrix with term rows, protein/node columns, and 1,0,-1 for pos,unk,neg values
+        2) List of terms in the order in which they appear in the matrix
         3) List of prots in the order in which they appear in the matrix
     """
     # rather than explicity building the matrix, use the indices to build a coordinate matrix
-    # rows are prots, cols are goids
+    # rows are prots, cols are terms
     i_list = []
     j_list = []
     data = []
-    goids = []
+    terms = []
     prots = []
     i = 0
 
@@ -651,7 +664,7 @@ def read_pos_neg_table_file(pos_neg_file):
             line = line.rstrip().split('\t')
             if line_idx == 0:
                 # this is the header line
-                goids = line[1:]
+                terms = line[1:]
                 continue
 
             prot, vals = line[0], line[1:]
@@ -666,27 +679,27 @@ def read_pos_neg_table_file(pos_neg_file):
 
     # convert it to a sparse matrix 
     print("Building a sparse matrix of annotations")
-    ann_matrix = sp.coo_matrix((data, (i_list, j_list)), shape=(len(prots), len(goids)), dtype=float).tocsr()
-    ann_matrix = ann_matrix.transpose()
-    return ann_matrix, goids, prots
+    ann_matrix = sp.coo_matrix((data, (i_list, j_list)), shape=(len(prots), len(terms)), dtype=float).tocsr()
+    ann_matrix = ann_matrix.transpose().tocsr()
+    return ann_matrix, terms, prots
 
 
 # keeping this for backwards compatibility
 def read_pos_neg_list_file(pos_neg_file):
     """
-    Reads a tab-delimited file with two lines per goterm. A positives line, and a negatives line
-        Each line has 3 columns: goid, pos/neg assignment (1 or -1), and a comma-separated list of prots
-    *returns*: 1) A matrix with goterm rows, protein/node columns, and
+    Reads a tab-delimited file with two lines per term. A positives line, and a negatives line
+        Each line has 3 columns: term, pos/neg assignment (1 or -1), and a comma-separated list of prots
+    *returns*: 1) A matrix with term rows, protein/node columns, and
         1,0,-1 for pos,unk,neg values
-        2) List of goterms in the order in which they appear in the matrix
+        2) List of terms in the order in which they appear in the matrix
         3) List of prots in the order in which they appear in the matrix
     """
     # rather than explicity building the matrix, use the indices to build a coordinate matrix
-    # rows are prots, cols are goids
+    # rows are prots, cols are terms
     i_list = []
     j_list = []
     data = []
-    goids = []
+    terms = []
     prots = []
     # this will track the index of the prots
     node2idx = {}
@@ -699,7 +712,7 @@ def read_pos_neg_list_file(pos_neg_file):
             line = line.decode() if '.gz' in pos_neg_file else line
             if line[0] == '#':
                 continue
-            goid, pos_neg_assignment, curr_prots = line.rstrip().split('\t')[:3]
+            term, pos_neg_assignment, curr_prots = line.rstrip().split('\t')[:3]
             curr_idx_list = []
             for prot in curr_prots.split(','):
                 prot_idx = node2idx.get(prot)
@@ -709,31 +722,31 @@ def read_pos_neg_list_file(pos_neg_file):
                     prots.append(prot)
                     i += 1
                 curr_idx_list.append(prot_idx)
-            # the file has two lines per goterm. A positives line, and a negatives line
+            # the file has two lines per term. A positives line, and a negatives line
             for idx in curr_idx_list:
                 i_list.append(idx)
                 j_list.append(j)
                 data.append(int(pos_neg_assignment))
             if int(pos_neg_assignment) == -1:
-                goids.append(goid)
+                terms.append(term)
                 j += 1
 
     # convert it to a sparse matrix 
     print("Building a sparse matrix of annotations")
-    ann_matrix = sp.coo_matrix((data, (i_list, j_list)), shape=(len(prots), len(goids)), dtype=float).tocsr()
+    ann_matrix = sp.coo_matrix((data, (i_list, j_list)), shape=(len(prots), len(terms)), dtype=float).tocsr()
     ann_matrix = ann_matrix.transpose()
-    return ann_matrix, goids, prots
+    return ann_matrix, terms, prots
 
 
 def youngs_neg(ann_obj, **kwargs):
     """
     for a term t, a gene g cannot be a negative for t if g shares an annotation with any gene annotated to t  
-    *ann_obj*: contains the terms x genes matrix with 1 (positive), -1 (negative) and 0 (unknown) assignments, as well as the list of goids, and prots
+    *ann_obj*: contains the terms x genes matrix with 1 (positive), -1 (negative) and 0 (unknown) assignments, as well as the list of terms, and prots
     *cat*: the GO category to get (either P, F, or C)
     *returns*: The ann_obj modified inplace
     """
     print("Running the Youngs 2013 method for better negative examples")
-    goids, prots = ann_obj.goids, ann_obj.prots  
+    terms, prots = ann_obj.terms, ann_obj.prots  
     pos_mat = (ann_obj.ann_matrix > 0).astype(int)
     neg_mat = -(ann_obj.ann_matrix < 0).astype(int)
     num_pos = len(pos_mat.data) 
@@ -762,7 +775,7 @@ def youngs_neg(ann_obj, **kwargs):
         utils.print_memory_usage()
     # store them in the original ann_matrix instead of making a copy
     #new_ann_obj = Sparse_Annotations(
-    #        ann_obj.dag_matrix, new_ann_mat, goids, prots)
+    #        ann_obj.dag_matrix, new_ann_mat, terms, prots)
     print("\t%d (%0.2f%%) negative examples relabeled to unknown examples (%d negative examples before, %d after)." % (
         num_neg - new_num_neg, (num_neg - new_num_neg) / float(num_neg)*100, num_neg, new_num_neg))
     print("\t%d total positive examples" % (num_pos))
@@ -802,12 +815,12 @@ def get_most_specific_ann(pos_mat, dag_matrix, verbose=False):
     return spec_ann_mat
 
 
-def weight_GMW(y, normalized_nets, net_names=None, goid=None):
+def weight_GMW(y, normalized_nets, net_names=None, term=None):
     """ TODO DOC
     """
     start_time = time.process_time()
-    if goid is not None:
-        print("\tgoid %s: %d positives, %d negatives" % (goid, len(np.where(y == 1)[0]), len(np.where(y == -1)[0])))
+    if term is not None:
+        print("\tterm %s: %d positives, %d negatives" % (term, len(np.where(y == 1)[0]), len(np.where(y == -1)[0])))
     alphas, indices = findKernelWeights(y, normalized_nets)
     # print out the computed weights for each network
     if net_names is not None:
@@ -824,7 +837,7 @@ def weight_GMW(y, normalized_nets, net_names=None, goid=None):
         weights_list[indices[i]] = alphas[i] 
     total_time = time.process_time() - start_time
 
-    # don't write each goterm's combined network to a file
+    # don't write each term's combined network to a file
     return combined_network, total_time, weights_list
 
 
@@ -852,7 +865,7 @@ def weight_SWSN(ann_matrix, sparse_nets=None, normalized_nets=None, net_names=No
     # remove rows with 0 annotations/positives
     empty_rows = []
     for i in range(ann_matrix.shape[0]):
-        pos, neg = alg_utils.get_goid_pos_neg(ann_matrix, i)
+        pos, neg = alg_utils.get_term_pos_neg(ann_matrix, i)
         # the combineWeightsSWSN method doesn't seem to
         # work if there's only 1 positive
         if len(pos) <= 1 or len(neg) <= 1:
@@ -926,18 +939,6 @@ def _net_normalize(X):
     """ 
     Normalizing networks according to node degrees.
     """
-    #if X.min() < 0:
-    #    print("### Negative entries in the matrix are not allowed!")
-    #    X[X < 0] = 0 
-    #    print("### Matrix converted to nonnegative matrix.")
-    # for now assume the network is symmetric
-    #if (X.T != X).all():
-    #    pass
-    #else:
-    #    print("### Matrix not symmetric.")
-    #    X = X + X.T - np.diag(np.diag(X))
-    #    print("### Matrix converted to symmetric.")
-
     # normalizing the matrix
     deg = X.sum(axis=1).A.flatten()
     deg = np.divide(1., np.sqrt(deg))

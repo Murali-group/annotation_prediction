@@ -4,18 +4,18 @@ from scipy import sparse as sp
 import numpy as np
 #from tqdm import tqdm, trange
 
-import src.algorithms.alg_utils as alg_utils
-import src.setup_sparse_networks as setup
-import src.algorithms.async_rw as async_rw
+from . import alg_utils as alg_utils
+from .. import setup_sparse_networks as setup
+from . import async_rw as async_rw
 
 
 def setupInputs(run_obj):
     # extract the variables out of the annotation object
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
     run_obj.hierarchy_mat = run_obj.ann_obj.dag_matrix
-    run_obj.goids = run_obj.ann_obj.goids
-    goid2idx = run_obj.ann_obj.goid2idx
-    terms_to_run_idx = [goid2idx[g] for g in run_obj.goids_to_run]
+    run_obj.terms = run_obj.ann_obj.terms
+    #term2idx = run_obj.ann_obj.term2idx
+    #terms_to_run_idx = [term2idx[g] for g in run_obj.terms_to_run]
 
     # setup the matrices
     if run_obj.kwargs.get('verbose'):
@@ -169,7 +169,7 @@ def compute_stuctures_IC(H):
     # print(num_descendants_vec)
     # for i, num_desc in enumerate(num_descendants_vec):
     #     if num_desc > 200:
-    #         print("%s: %d descendants" % (ann_obj.goids[i], num_desc))
+    #         print("%s: %d descendants" % (ann_obj.terms[i], num_desc))
     # for each term t, the IC is 1 - log(|desc(t)|)/log(num_all_terms)
     ic_vec = 1 - (np.log(num_descendants_vec) / np.log(num_terms))
     return ic_vec
@@ -205,7 +205,7 @@ def run(run_obj):
     Function to run AptRank and BirgRank
     """
     params_results = run_obj.params_results
-    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
+    term_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     P, SSN, P_H, pos_mat = run_obj.P, run_obj.SSN, run_obj.P_H, run_obj.pos_mat
     alg, params = run_obj.name, run_obj.params
 
@@ -229,15 +229,15 @@ def run(run_obj):
     alg_name = "%s%s" % (alg, run_obj.params_str)
     params_results["%s_process_time"%alg_name] += process_time
 
-    # limit the scores matrix to only the GOIDs for which we want the scores
-    if len(run_obj.goids_to_run) < goid_scores.shape[0]:
-        for goid in run_obj.goids_to_run:
-            idx = run_obj.ann_obj.goid2idx[goid]
-            goid_scores[idx] = S[idx]
+    # limit the scores matrix to only the TERMs for which we want the scores
+    if len(run_obj.terms_to_run) < term_scores.shape[0]:
+        for term in run_obj.terms_to_run:
+            idx = run_obj.ann_obj.term2idx[term]
+            term_scores[idx] = S[idx]
     else:
-        goid_scores = S
+        term_scores = S
 
-    run_obj.goid_scores = goid_scores
+    run_obj.term_scores = term_scores
     run_obj.params_results = params_results
     return
 

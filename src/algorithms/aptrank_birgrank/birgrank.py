@@ -1,13 +1,11 @@
 
-#import numpy as np
-import src.algorithms.alg_utils as alg_utils
+import time
+import numpy as np
 from scipy.sparse import csc_matrix, lil_matrix, vstack, hstack, eye
 from scipy import sparse as sp
 from scipy.sparse.linalg import spsolve
-import numpy as np
-import time
-#import sys
 from tqdm import tqdm, trange
+from .. import alg_utils as alg_utils
 
 __author__ = "Jeff Law"
 # python implementation of the BirgRank algorithm 

@@ -1,11 +1,11 @@
 # Python implementation of GeneMANIA
 
 import time
-import src.algorithms.alg_utils as alg_utils
 import numpy as np
 from scipy.sparse import eye, diags
 from scipy.sparse.linalg import spsolve, cg, spilu, LinearOperator
 
+from . import alg_utils
 
 def setup_laplacian(W):
     # first normalize the network
@@ -18,10 +18,13 @@ def setup_laplacian(W):
     return L
 
 
-def runGeneMANIA(L, y, tol=1e-05, Milu=None, verbose=False):
+def runGeneMANIA(L, y, alpha=1, tol=1e-05, Milu=None, verbose=False):
     """
     *L*: Laplacian of the original network
-    *y*: vector of positive and negative assignments
+    *y*: vector of positive and negative assignments. 
+         If y does not contain negatives, will be run as GeneManiaPlus, also known as Regularized Laplacian (RL). 
+    *alpha*: parameter between 0 and 1 to control the influence of neighbors in the network.
+        0 would ignore the network completely, and nodes would get their original score.
     *tol*: Conjugate Gradient tolerance for convergance
 
     *returns*: scores array, process_time, wall_time
@@ -43,13 +46,19 @@ def runGeneMANIA(L, y, tol=1e-05, Milu=None, verbose=False):
         # taken from the GeneMANIA paper
         k = (num_pos - num_neg) / float(num_pos + num_neg)
         y[np.where(y == 0)[0]] = k
+        # TEST try setting k to 0 to see if that helps the smin problem where GM always has a high smin:
+        # It does indeed fix the smin problem, although Fmax median is about 0.05 lower
+        #pass
+        # also try setting k to a specific value to see if that trend still holds true
+        #k=-0.9
+        #y[np.where(y == 0)[0]] = k
 
     # this measures the amount of time taken by all processors
     # and Conjugate Gradient is paralelized
     start_process_time = time.process_time()
     # this measures the amount of time that has passed
     start_wall_time = time.time()
-    M = eye(L.shape[0]) + L
+    M = eye(L.shape[0]) + alpha*L
 
     # keep track of the number of iterations
     num_iters = 0
@@ -63,7 +72,7 @@ def runGeneMANIA(L, y, tol=1e-05, Milu=None, verbose=False):
     process_time = time.process_time() - start_process_time
     wall_time = time.time() - start_wall_time
     if verbose:
-        print("Solved GeneMANIA using conjugate gradient (%0.2f sec, %0.2f sec process_time). Info: %s, k=%0.2f, iters=%d" % (
+        print("Solved GeneMANIA using conjugate gradient (%0.2f sec, %0.2f sec process_time). Info: %s, k=%0.6f, iters=%d" % (
             wall_time, process_time, str(info), k, num_iters))
 
     return f, process_time, wall_time, num_iters

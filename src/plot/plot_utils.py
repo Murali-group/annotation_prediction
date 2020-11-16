@@ -12,48 +12,48 @@ from scipy.stats import kruskal, mannwhitneyu, wilcoxon
 import networkx as nx
 # plotting imports
 import matplotlib
-matplotlib.use('Agg')  # To save files remotely. 
+if __name__ == "__main__":
+    # Use this to save files remotely. 
+    matplotlib.use('Agg')  
 import matplotlib.pyplot as plt
-plt.rcParams['svg.fonttype'] = 'none'  # To make sure text is stored as text for svg.
 import matplotlib.patches as patches
 import pandas as pd
 import seaborn as sns
 # make this the default for now
 sns.set_style('darkgrid')
-# add two levels up to the path
-#from os.path import dirname
-#base_path = dirname(dirname(dirname(__file__)))
-#sys.path.append(base_path)
-#print(sys.path)
-#os.chdir(base_path)
-#print(base_path)
-#import run_eval_algs
-#from src.algorithms import runner as runner
-#sys.path.append(base_path + "/src/algorithms")
-#print(sys.path)
-#import runner
+sns.set_context('paper')
+# Extra settings for the matplotlib text to be editable in inkscape
+new_rc_params = {'text.usetex': False,
+"svg.fonttype": 'none'
+}
+matplotlib.rcParams.update(new_rc_params)
+
 # my local imports
-fss_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-sys.path.insert(0,fss_dir)
-import run_eval_algs
-import src.algorithms.runner as runner
-import src.utils.file_utils as utils
-import src.evaluate.eval_utils as eval_utils
-import src.go_term_prediction_examples.go_term_prediction_examples as go_examples
+from ..algorithms import runner as runner
+from ..utils import config_utils as config_utils
+from ..evaluate import eval_utils as eval_utils
+from ..evaluate import cross_validation as cv
+from ..utils import ontology_utils as ont_utils 
 
 
 ALG_NAMES = {
+    #'localplus': 'Local+', 'local': 'Local',
     'localplus': 'Local', 'local': 'Local-',
     'sinksource': 'SinkSource', 'sinksourceplus': 'SinkSource+',
     'sinksource_bounds': 'SinkSource_Bounds',
     'fastsinksource': 'FSS', 'fastsinksourceplus': 'FSS+',
-    'genemania': 'GeneMANIA',  
+    'genemania': 'GM', 'genemaniaplus': 'GM+',
     'birgrank': 'BirgRank', 'aptrank': 'AptRank OneWay',
     'async_rw': 'AsyncRW',
+    'logistic_regression': 'LogReg',
+    'svm': 'SVM', 'deepnf': 'deepNF',
     }
 
 measure_map = {'fmax': r'F$_{\mathrm{max}}$'}
-param_map = {'alpha': r'$\rm \alpha$'}
+param_map = {
+    'alpha': r'$\rm \alpha$',
+    'lambda': r'$\rm \lambda$',
+}
 #param_map = {'alpha': r'$\mathbf{\mathrm{\alpha}}$'}
 
 # tried to be fancy :P
@@ -102,9 +102,9 @@ def setup_opts():
                      help="Algorithms to plot. Must be in the config file. If specified, will ignore 'should_run' in the config file")
     group.add_argument('--out-pref', '-o', type=str, default="",
                      help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
-    group.add_argument('--goterm', '-G', type=str, action="append",
+    group.add_argument('--term', '-G', type=str, action="append",
                      help="Specify the GO terms to use (should be in GO:00XX format)")
-    group.add_argument('--taxon', '-T', type=str, 
+    group.add_argument('--taxon', '-S', type=str, 
                      help="Specify the taxon ID (only used to get the prec-rec file)")
     group.add_argument('--exp-type', type=str, default='cv-5folds',
                      help='Type of experiment (e.g., cv-5fold, loso, temporal-holdout). Default: cv-5folds')
@@ -129,7 +129,7 @@ def setup_opts():
     group.add_argument('--measure', action="append",
                      help="Evaluation measure to use. May specify multiple. Options: 'fmax', 'avgp', 'auprc', 'auroc'. Default: 'fmax'")
     group.add_argument('--boxplot', action='store_true', default=False,
-                     help="Compare all runners in the config file using a boxplot")
+                     help="Compare all terms for all runners in the config file using a boxplot")
     group.add_argument('--line', action='store_true', default=False,
                      help="Compare all runners on all datasets in the config file using a lineplot")
     group.add_argument('--local-line', action='store_true', default=False,
@@ -204,8 +204,7 @@ def parse_args():
 
 
 def main(config_map, ax=None, out_pref='', **kwargs):
-    if 'out_pref' in kwargs:
-        del kwargs['out_pref']
+
     input_settings, alg_settings, output_settings, out_pref, kwargs = setup_variables(
         config_map, out_pref, **kwargs)
     kwargs['out_pref'] = out_pref
@@ -218,7 +217,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
         # loop through all specified terms, or use an empty string if no terms were specified
-        terms = kwargs['goterm'] if kwargs['goterm'] is not None else ['']
+        terms = kwargs['term'] if kwargs['term'] is not None else ['']
         for term in terms:
             term = '-'+term if term != '' else ''
             prec_rec = 'prec-rec' + kwargs.get('taxon','') + term
@@ -231,7 +230,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             # limit to the specified terms
             # TODO
             #if kwargs['only_terms'] is not None:
-            #    df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
+            #    df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
 
             title = '-'.join(df_all['plot_exp_name'].unique())
             print(kwargs['title'])
@@ -245,12 +244,12 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             sys.exit()
         # limit to the specified terms
         if kwargs.get('only_terms') is not None:
-            df_all = df_all[df_all['#goid'].isin(kwargs['only_terms'])]
-        num_terms = df_all['#goid'].nunique()
-        if kwargs['exp_type'] == "loso":
-            sp_taxon_pairs = df_all['#taxon'].astype(str) + df_all['#goid']
+            df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
+        num_terms = df_all['#term'].nunique()
+        if kwargs.get('loso'):
+            sp_taxon_pairs = df_all['#taxon'].astype(str) + df_all['#term']
             num_terms = sp_taxon_pairs.nunique()
-            #num_terms = df_all.groupby(['#taxon', '#goid']).size()
+            #num_terms = df_all.groupby(['#taxon', '#term']).size()
         algs = df_all['Algorithm'].unique()
 
         print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
@@ -274,37 +273,29 @@ def main(config_map, ax=None, out_pref='', **kwargs):
 
 
         # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
+        measure_axes = {}
         for measure in kwargs['measures']:
             # also check the statistical significance options
             if kwargs['compare_param'] and kwargs['max_val']:
                 compute_param_stat_sig(df_all, measure=measure, **kwargs)
             if kwargs['scatter']:
-                ax = plot_scatter(df_all, measure=measure, ax=ax, **kwargs) 
+                measure_axes[measure] = plot_scatter(df_all, measure=measure, ax=ax, **kwargs) 
             if kwargs['line']:
-                ax = plot_line(df_all, measure=measure, ax=ax, **kwargs)
+                measure_axes[measure] = plot_line(df_all, measure=measure, ax=ax, **kwargs)
             if kwargs['boxplot']:
-                if df_all['plot_exp_name'].nunique() > 1:
-                    ax = plot_multi_boxplot(df_all, measure=measure, ax=ax, **kwargs)
+                if df_all['plot_exp_name'].nunique() > 1 and kwargs.get('hue') is None:
+                    measure_axes[measure] = plot_multi_boxplot(df_all, measure=measure, ax=ax, **kwargs)
                 else:
-                    ax = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
-    return ax
+                    measure_axes[measure] = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
+    return measure_axes
 
 
 def setup_variables(config_map, out_pref='', **kwargs):
     """
     Function to setup the various args specified in kwargs
     """
-    input_settings = config_map['input_settings']
-    #input_dir = input_settings['input_dir']
-    alg_settings = config_map['algs']
-    output_settings = config_map['output_settings']
-    # update the settings specified in this script with those set in the yaml file
-    if config_map.get('eval_settings'):
-        #kwargs.update(config_map['eval_settings'])
-        for key, val in config_map['eval_settings'].items():
-            # if the user provided a value for this parameter (i.e., in kwargs), don't overwrite it
-            if key not in kwargs or kwargs[key] is None or kwargs[key] == "":
-                kwargs[key] = val
+    input_settings, input_dir, output_dir, alg_settings, kwargs \
+        = config_utils.setup_config_variables(config_map, **kwargs)
     if config_map.get('plot_settings'):
         #config_map['plot_settings'].update(kwargs)
         kwargs.update(config_map['plot_settings'])
@@ -327,7 +318,7 @@ def setup_variables(config_map, out_pref='', **kwargs):
 
     if out_pref == "":
         out_pref = "%s/viz/%s/%s/" % (
-                output_settings['output_dir'], 
+                output_dir, 
                 input_settings['datasets'][0]['net_version'], 
                 input_settings['datasets'][0]['exp_name'])
     if kwargs.get('only_terms_file') is not None:
@@ -342,9 +333,9 @@ def setup_variables(config_map, out_pref='', **kwargs):
     # TODO only create the output dir if plots are will be created
     if out_pref is not None:
         out_pref += kwargs.get('postfix','')
-        utils.checkDir(os.path.dirname(out_pref))
+        os.makedirs(os.path.dirname(out_pref), exist_ok=True)
 
-    return input_settings, alg_settings, output_settings, out_pref, kwargs
+    return input_settings, alg_settings, config_map['output_settings'], out_pref, kwargs
 
 
 def savefig(out_file, **kwargs):
@@ -580,14 +571,7 @@ def plot_multi_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, *
         savefig(out_file, **kwargs)
 
 
-def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    df['Algorithm'] = df['Algorithm'].astype(str)
-    df = df[['Algorithm', measure]]
-    #print(df.head())
-    df.reset_index(inplace=True)
-    df = df.pivot(columns='Algorithm', values=measure)
-    #print(df.head())
-    #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
+def get_alg_order(**kwargs):
     if kwargs.get('compare_param'):
         # we're not ordering the algorithms, but the parameters
         # and the param is in the 'algs' column
@@ -596,6 +580,18 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
             order += [str(p) for p in kwargs['alg_params'][alg][kwargs['compare_param']]]
     else:
         order = [kwargs['alg_names'][a] for a in kwargs['algs']]
+    return order
+
+
+def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
+    df['Algorithm'] = df['Algorithm'].astype(str)
+    df = df[['Algorithm', measure]]
+    #print(df.head())
+    df.reset_index(inplace=True)
+    df = df.pivot(columns='Algorithm', values=measure)
+    #print(df.head())
+    #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
+    order = get_alg_order(**kwargs)
     try:
         # If there are algorithms which don't have a set shape or color, this will fail
         curr_palette = [alg_colors[alg] for alg in order]
@@ -622,6 +618,9 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
     # for some reason sharex/sharey wasn't working, so I just removed the label
     if kwargs.get('share_measure') is True:
         ylabel = ""
+    if kwargs.get('ylim'):
+        y1, y2 = kwargs['ylim']
+        ax.set_ylim(y1, y2)
     set_labels(ax, title, xlabel, ylabel, **kwargs)
 
     if out_pref is not None:
@@ -635,8 +634,8 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
     Plot precision recall curves, or (TODO) ROC curves 
     """
     # make a prec-rec plot per term
-    for term in sorted(df["#goid"].unique()):
-        curr_df = df[df['#goid'] == term]
+    for term in sorted(df["#term"].unique()):
+        curr_df = df[df['#term'] == term]
         # get only the positive examples to plot prec_rec
         curr_df = curr_df[curr_df['pos/neg'] == 1]
         # also put the fmax on the plot, and add it to the label
@@ -700,9 +699,9 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
 
 
 def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    if kwargs['exp_type'] == "loso":
-        df['taxon-goid'] = df['#taxon'].map(str) + '-' + df['#goid']
-        index_col = 'taxon-goid'
+    if kwargs.get('loso'):
+        df['taxon-term'] = df['#taxon'].map(str) + '-' + df['#term']
+        index_col = 'taxon-term'
     else:
         # change the index to the terms
         index_col = df.columns[0]
@@ -772,13 +771,74 @@ def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
         savefig(out_file, **kwargs)
 
 
+def compute_alg_stat_sig(df, measure='fmax', **kwargs):
+    """
+    Compute the statistical significance (using wilcoxon) of the differences between methods
+    """
+    out_str = ""
+    algs = df['Algorithm'].unique()
+    combinations = list(itertools.combinations(algs, 2))
+    out_str += "#alg1\talg2\talg1-med\talg2-med\tpval\tCorrected p-value (x%d)\n" % (len(combinations))
+    # Don't think sorting is needed
+    #df_curr.sort_values('goid', inplace=True) 
+    for a1, a2 in combinations:
+        #a1_vals = df[df['Algorithm'] == kwargs['alg_names'].get(a1, a1)][measure]
+        #a2_vals = df[df['Algorithm'] == kwargs['alg_names'].get(a2, a2)][measure]
+        a1_vals = df[df['Algorithm'] == a1][measure]
+        a2_vals = df[df['Algorithm'] == a2][measure]
+        #test_statistic, pval = mannwhitneyu(a1_vals, a2_vals, alternative='greater') 
+        if np.median(a1_vals) > np.median(a2_vals):
+            test_statistic, pval = wilcoxon(a1_vals, a2_vals, alternative='greater') 
+        else:
+            test_statistic, pval = wilcoxon(a1_vals, a2_vals, alternative='less') 
+        out_str += "%s\t%s\t%0.3f\t%0.3f\t%0.3e\t%0.3e\n" % (
+            a1, a2, np.median(a1_vals), np.median(a2_vals), pval, pval*len(combinations))
+
+    # # also compare individual species
+    # curr_species = df['#taxon'].unique()
+    # # limit the species for which we run the test to those that have at least 5 terms
+    # species_with_terms = set([s for s, df_s in df.groupby('#taxon') \
+    #                           if df_s['#goid'].nunique() >= sp_term_cutoff])
+    # print("%d species with at least %d terms" % (len(species_with_terms), sp_term_cutoff))
+    # if sort_taxon_by_fmax is not None:
+    #     curr_species = sort_taxon_by_fmax
+    # out_str += "Species\tAlg1\tAlg2\tAlg1-med\tAlg2-med\tRaw p-value\tCorrected p-value (x%d)\n" % (len(species_with_terms))
+    # for s in curr_species:
+    #     #name = f_settings.NAME_TO_SHORTNAME2.get(selected_species[str(s)],'-')
+    #     name = kwargs['sp_names'].get(str(s),'-') if 'sp_names' in kwargs else '-'
+    #     df_s = df[df['#taxon'] == s]
+    #     a1_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg1, alg1)][measure]
+    #     a2_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg2, alg2)][measure]
+    #     if s in species_with_terms:
+    #     #try:
+    #         #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
+    #         # TODO requires an updated version of scipy
+    #         test_statistic, pval = wilcoxon(a1_fmax, a2_fmax, alternative='greater') 
+    #         line = "%s\t%s\t%s\t%0.3f\t%0.3f\t%0.2e\t%0.2e" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median(), pval, pval*len(species_with_terms))
+    #         sp_pval[s] = pval
+    #     # this only really happens when there is only 1 or two terms with the same fmax
+    #     #except ValueError:
+    #     else:
+    #         line = "%s\t%s\t%s\t%0.3f\t%0.3f\t-\t-" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median())
+    #         pval = 1
+    #     out_str += line+'\n'
+
+    # if kwargs.get('forceplot') or not os.path.isfile(out_file):
+    #     print("writing to %s" % (out_file))
+    #     with open(out_file, 'w') as f:
+    #         f.write(out_str)
+    # else:
+    #     print("Would've written to %s. Use --forceplot to overwrite" % (out_file))
+    print(out_str)
+
+
 def compute_param_stat_sig(df, measure='fmax', **kwargs):
     compare_param, max_val = kwargs['compare_param'], str(kwargs['max_val'])
     # 'Algorithm' is actually holding the parameter value
     param_col = 'Algorithm'
     alg_params = kwargs['alg_params']
     out_file = "%s%s-pvals.tsv" % (kwargs['out_pref'], measure)
-    out_str = "#alg\t%s\t%s-2\t2-median fmax\tpval\tmedian of differences\n" % (compare_param, compare_param)
+    out_str = "#alg\t%s\t%s-2\t2-median %s\tpval\tmedian of differences\n" % (compare_param, compare_param, measure)
     if kwargs['forceplot'] or not os.path.isfile(out_file):
         params_list = []
         params_alg = {}
@@ -849,11 +909,11 @@ def results_overview(df, measures=['fmax']):
         df_curr = df[df['plot_exp_name'] == plot_exp_name]
         #net_version, exp_name = df_curr['net_version'].unique()[0], df_curr['exp_name'].unique()[0]
         #if len(plot_exp_name) > len(net_version + exp_name):
-        # limit the goterms to those that are also present for SinkSource(?)
+        # limit the terms to those that are also present for SinkSource(?)
         for measure in measures:
             for alg in sorted(df_curr['Algorithm'].unique()):
                 df_alg = df_curr[df_curr['Algorithm'] == alg]
-                print("%s\t%s\t%s\t%0.3f\t%d\t%d" % (plot_exp_name, measure, alg, df_alg[measure].median(), df_alg['#goid'].nunique(), len(df_alg)))
+                print("%s\t%s\t%s\t%0.3f\t%d\t%d" % (plot_exp_name, measure, alg, df_alg[measure].median(), df_alg['#term'].nunique(), len(df_alg)))
                 #print("%s\t%s\t%s\t%0.3f\t%d" % (plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
                 #print("%s\t%s\t%s\t%s\t%0.3f\t%d" % (net_version, exp_name, measure, alg, df_alg.median(), len(df_alg)))
 
@@ -864,7 +924,7 @@ def get_algs_to_run(alg_settings, **kwargs):
     # if there aren't any algs specified by the command line (i.e., kwargs),
     # then use whatever is in the config file
     if kwargs.get('algs') is None:
-        algs_to_run = run_eval_algs.get_algs_to_run(alg_settings)
+        algs_to_run = config_utils.get_algs_to_run(alg_settings)
         kwargs['algs'] = [a.lower() for a in algs_to_run]
         if print_warning:
             print("\nNo algs were specified. Using the algorithms in the yaml file:")
@@ -889,7 +949,7 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
         if kwargs.get('most_specific_terms'):
             # load the ontology
             obo_file = "%s/%s" % (input_settings['input_dir'], dataset['obo_file'])
-            go_dags = go_examples.parse_obo_file_and_build_dags(obo_file)
+            go_dags = ont_utils.parse_obo_file_and_build_dags(obo_file)
         for alg in algs:
             if alg not in alg_settings:
                 print("%s not found in config file. Skipping" % (alg))
@@ -937,7 +997,7 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
 def get_most_specific_sp_term_pairs(df, go_dags, **kwargs):
     # figure out which DAG this is
     for h, dag in go_dags.items():
-        t = df['#goid'].values[0]
+        t = df['#term'].values[0]
         if dag.has_node(t):
             break
     print("\tusing %s hierarchy" % (h))
@@ -945,11 +1005,11 @@ def get_most_specific_sp_term_pairs(df, go_dags, **kwargs):
     new_df = pd.DataFrame()
     # for each species, limit to the terms which have no descendants
     for taxon, df_t in df.groupby('#taxon'):
-        terms = get_most_specific_terms(df_t['#goid'].values, dag)
-        df_t = df_t[df_t['#goid'].isin(terms)]
+        terms = get_most_specific_terms(df_t['#term'].values, dag)
+        df_t = df_t[df_t['#term'].isin(terms)]
         new_df = pd.concat([new_df, df_t])
     print("\t%d sp-term pairs limited to %d most specific sp-term pairs" % (
-        (df['#taxon'].astype(str) + df['#goid']).nunique(), (new_df['#taxon'].astype(str) + new_df['#goid']).nunique()))
+        (df['#taxon'].astype(str) + df['#term']).nunique(), (new_df['#taxon'].astype(str) + new_df['#term']).nunique()))
     #print(new_df['#taxon'].nunique())
     #print(new_df.head())
     #sys.exit()
@@ -987,13 +1047,13 @@ def add_dataset_settings(dataset, df):
 
 def load_alg_results(
         dataset, alg, alg_params, prec_rec_str="", 
-        results_dir='outputs', exp_type='cv-5folds', 
+        results_dir='outputs', eval_type="cv-5folds",
         only_terms=None, postfix='', **kwargs):
     """
     For a given dataset and algorithm, build the file path and load the results
     *prec_rec_str*: postfix to change file name. Usually 'prec-rec' if loading precision recal values
     *results_dir*: the base output directory
-    *exp_type*: The string specifying the evaluation type. For example: 'cv-5folds' or 'th' for temporal holdout
+    *eval_type*: The string specifying the evaluation type. For example: 'cv-5folds' or 'th' for temporal holdout
     *terms*: a set of terms for which to limit the output
     """
     alg_name = alg
@@ -1008,17 +1068,19 @@ def load_alg_results(
     combos = [dict(zip(alg_params.keys(), val))
         for val in itertools.product(
             *(alg_params[param] for param in alg_params))]
-    print("%d combinations for %s" % (len(combos), alg))
+    if kwargs.get('verbose'):
+        print("%d combinations for %s" % (len(combos), alg))
     # load the CV file for each parameter combination for this algorithm
     df_all = pd.DataFrame()
     for param_combo in combos:
         # first get the parameter string for this runner
         params_str = runner.get_runner_params_str(alg, dataset, param_combo)
-        cv_file = "%s/%s/%s%s%s%s.txt" % (out_dir, alg, exp_type, params_str, postfix, prec_rec_str)
+        cv_file = "%s/%s/%s%s%s%s.txt" % (out_dir, alg, eval_type, params_str, postfix, prec_rec_str)
         if not os.path.isfile(cv_file):
             print("\tnot found %s - skipping" % (cv_file))
             continue
-        print("\treading %s" % (cv_file))
+        if kwargs.get('verbose'):
+            print("\treading %s" % (cv_file))
         df = pd.read_csv(cv_file, sep='\t')
         # remove any duplicate rows
         df.drop_duplicates(inplace=True)

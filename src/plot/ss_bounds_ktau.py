@@ -16,9 +16,9 @@ import seaborn as sns
 # make this the default for now
 sns.set_style('darkgrid')
 # my local imports
-fss_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-sys.path.insert(0,fss_dir)
-from src.plot import plot_utils
+#fss_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+#sys.path.insert(0,fss_dir)
+from . import plot_utils
 
 
 # TODO use the ax that was passed in
@@ -37,10 +37,13 @@ def main(config_map, out_pref='', **kwargs):
 
     if out_pref is not None:
         # type of sinksource-squeeze rank comparison
-        if alg_settings[alg]['rank_pos_neg'][0] is True:
+        if alg_settings[alg]['rank_all'][0] is True:
+            exp_type = "all-"
+        elif alg_settings[alg]['rank_pos_neg'][0] is True:
             exp_type = "pos-neg-"
         else:
-            exp_type = "all-"
+            print("ERROR: must speficy either 'rank_all' or 'rank_pos_neg'") 
+            sys.exit("Quitting")
         # TODO how should I handle multiple parameters?
         alpha = alg_settings[alg]['alpha'][0]
         out_pref = "%s%sa%s" % (out_pref, exp_type, alpha)

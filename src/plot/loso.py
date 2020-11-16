@@ -17,13 +17,12 @@ import pandas as pd
 import seaborn as sns
 # make this the default for now
 sns.set_style('darkgrid')
+
 # my local imports
-fss_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-sys.path.insert(0,fss_dir)
-from src.plot import plot_utils
-from src.evaluate import eval_leave_one_species_out as eval_loso
-from src import setup_sparse_networks as setup
-import run_eval_algs
+from . import plot_utils
+from ..evaluate import eval_leave_one_species_out as eval_loso
+from .. import setup_sparse_networks as setup
+from .. import main as run_eval_algs
 
 
 measure_map = plot_utils.measure_map
@@ -55,9 +54,9 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     ann_obj, eval_ann_obj = load_ann_datasets(
             out_dir, dataset, in_dir, 
             alg_settings, **kwargs)
-    
-    #ann_obj, eval_ann_obj, goid_names_file = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
-    kwargs['goid_names_file'] = get_goid_names_file(in_dir, dataset)
+
+    #ann_obj, eval_ann_obj, term_names_file = load_annotations(dataset, in_dir, alg_settings, **kwargs) 
+    kwargs['term_names_file'] = get_term_names_file(in_dir, dataset)
     # if eval_ann_obj is specified, then use it to get stats instead of the ann_obj
     curr_ann_obj = eval_ann_obj if eval_ann_obj is not None else ann_obj
     # get the # ann per species
@@ -71,7 +70,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
         subs[0] for subs in sp_name.split(' ')[:2]) for t, sp_name in selected_species.items()}
     taxon_num_ann = get_taxon_ann_counts(curr_ann_obj, species_to_uniprot_idx, taxons, **kwargs)
     pos_mat = (ann_obj.ann_matrix > 0).astype(int)
-    goid_num_ann = {ann_obj.goids[i]: num for i, num in enumerate(np.ravel(pos_mat.sum(axis=1)))}
+    term_num_ann = {ann_obj.terms[i]: num for i, num in enumerate(np.ravel(pos_mat.sum(axis=1)))}
 
     print("\t%d algorithms, %d plot_exp_name values\n" % (df_all['Algorithm'].nunique(), len(df_all['plot_exp_name'].unique())))
     #print(df_all.head())
@@ -98,7 +97,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     kwargs['out_pref'] = out_pref
 
     #results_overview(ev_code_results, measures=measures, **kwargs) 
-    generate_plots(df, taxon_num_ann, goid_num_ann, **kwargs) 
+    generate_plots(df, taxon_num_ann, term_num_ann, **kwargs) 
 
 
 def load_annotations(dataset, input_dir, alg_settings, **kwargs):
@@ -122,9 +121,9 @@ def load_annotations(dataset, input_dir, alg_settings, **kwargs):
     _, ann_obj, eval_ann_obj = run_eval_algs.load_annotations(nodes, dataset, input_dir, **kwargs)
 
     #summary_file = "inputs/pos-neg/%s/pos-neg-10-summary-stats.tsv" % (curr_ev_codes)
-    #kwargs['goid_names_file'] =  goid_names_file
+    #kwargs['term_names_file'] =  term_names_file
     # if there are no annotations, then skip this dataset
-    if len(ann_obj.goids) == 0:
+    if len(ann_obj.terms) == 0:
         print("No annotations found. Quitting")
         sys.exit()
     # don't need to worry about negative examples here because we're only using positive examples
@@ -138,20 +137,20 @@ def load_annotations(dataset, input_dir, alg_settings, **kwargs):
 #        ann_obj = experiments.youngs_neg(ann_obj, obo_file, "%s/%s" % (input_dir,dataset['pos_neg_file']))
 #        if eval_ann_obj is not None:
 #            eval_ann_obj = experiments.youngs_neg(eval_ann_obj, obo_file, "%s/%s" % (input_dir,dataset['pos_neg_file']))
-    return ann_obj, eval_ann_obj, goid_names_file
+    return ann_obj, eval_ann_obj, term_names_file
 
 
-def get_goid_names_file(input_dir, dataset):
+def get_term_names_file(input_dir, dataset):
     pos_neg_file = "%s/%s" % (input_dir, dataset['pos_neg_file'])
     pos_neg_file = pos_neg_file.replace("bp-",'').replace("mf-",'')
     # pos-neg-bp-10-list.tsv
     if '-list' in pos_neg_file:
-        goid_names_file = pos_neg_file.replace("-list","-summary-stats")
+        term_names_file = pos_neg_file.replace("-list","-summary-stats")
     elif '.gz' in pos_neg_file:
-        goid_names_file = pos_neg_file.replace(".tsv.gz","-summary-stats.tsv")
+        term_names_file = pos_neg_file.replace(".tsv.gz","-summary-stats.tsv")
     else:
-        goid_names_file = pos_neg_file.replace(".tsv","-summary-stats.tsv")
-    return goid_names_file
+        term_names_file = pos_neg_file.replace(".tsv","-summary-stats.tsv")
+    return term_names_file
 
 
 def get_taxon_ann_counts(ann_obj, species_to_uniprot_idx, taxons, **kwargs):
@@ -176,13 +175,13 @@ def get_taxon_ann_counts(ann_obj, species_to_uniprot_idx, taxons, **kwargs):
     return taxon_num_ann
 
 
-def generate_plots(df, taxon_num_ann, goid_num_ann, 
+def generate_plots(df, taxon_num_ann, term_num_ann, 
         out_pref='', measures=['fmax'], **kwargs):
     #cutoffs_data, out_dir = ev_code_results[(version, ev_codes, eval_ev_codes, h)]
     sort_taxon_by_fmax = None    
 
 #         title = "Evaluation of recovery of %s ev. codes from %s ev. codes %s\n for 19 pathogenic bacteria. - %s  %s\n %d GO terms with %d <= # annotations < %d %s" % (
-#             eval_ev_codes, ev_codes, use_neg_str, version, keep_ann, df_curr['goid'].nunique(), cutoff1, cutoff2, "overall" if split_overall else "")
+#             eval_ev_codes, ev_codes, use_neg_str, version, keep_ann, df_curr['term'].nunique(), cutoff1, cutoff2, "overall" if split_overall else "")
     #recov_str = " recovery of %s ev. codes from" % (eval_ev_codes) if eval_ev_codes != ""  else ""
 
     #for i, (cutoff1, cutoff2) in enumerate(cutoffs):
@@ -191,7 +190,7 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
     #title = kwargs.get('title', '')
     #if kwargs['for_pub'] is False:
     #    title = "Evaluation of%s %s ev. codes\n for 19 pathogenic bacteria. - %s\n %d %s GO terms with %d+ annotations" % (
-    #        recov_str, ev_codes, version, df_curr['goid'].nunique(), h.upper(), cutoff1)
+    #        recov_str, ev_codes, version, df_curr['term'].nunique(), h.upper(), cutoff1)
     #out_file = ""
     for measure in measures:
         print("Creating plots for '%s'" % (measure))
@@ -204,8 +203,8 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
         # TODO make an option for this
         sp_term_cutoff = 5
         df_taxon_cutoff = pd.concat(dfT for taxon, dfT in df.groupby('#taxon') \
-                                    #if dfT['#goid'].nunique() < sp_term_cutoff)
-                                    if dfT['#goid'].nunique() >= sp_term_cutoff)
+                                    #if dfT['#term'].nunique() < sp_term_cutoff)
+                                    if dfT['#term'].nunique() >= sp_term_cutoff)
         sig_results, sig_species = eval_stat_sig(
             df, stat_file, measure=measure,
             sort_taxon_by_fmax=sort_taxon_by_fmax, **kwargs)
@@ -227,7 +226,7 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
             scatterplot_taxon_fmax(df, measure=measure, 
                     out_file=out_file, **kwargs)
         else:
-            scatterplot_fmax(df, goid_num_ann, measure=measure, 
+            scatterplot_fmax(df, term_num_ann, measure=measure, 
                     out_file=out_file, **kwargs)
 
 
@@ -240,7 +239,7 @@ def eval_stat_sig(
     combinations = list(itertools.combinations(kwargs['algs'], 2))
     out_str += "#alg1\talg2\tpval\tCorrected p-value (x%d)\n" % (len(combinations))
     # Don't think sorting is needed
-    #df_curr.sort_values('goid', inplace=True) 
+    #df_curr.sort_values('term', inplace=True) 
     for a1, a2 in combinations:
         df1 = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a1, a1)]
         df2 = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a2, a2)]
@@ -258,7 +257,7 @@ def eval_stat_sig(
     curr_species = df_curr['#taxon'].unique()
     # limit the species for which we run the test to those that have at least 5 terms
     species_with_terms = set([s for s, df_s in df_curr.groupby('#taxon') \
-                              if df_s['#goid'].nunique() >= sp_term_cutoff])
+                              if df_s['#term'].nunique() >= sp_term_cutoff])
     print("%d species with at least %d terms" % (len(species_with_terms), sp_term_cutoff))
     if sort_taxon_by_fmax is not None:
         curr_species = sort_taxon_by_fmax
@@ -327,7 +326,7 @@ def plot_fmax_eval(
         species = kwargs['sp_abbrv'].get(str(s),s) if 'sp_abbrv' in kwargs else s
         species_labels[s] = "%s.%s(%d)" % (
             species, ' ' if not horiz else '\n',
-            df_curr[df_curr['#taxon'] == s]['#goid'].nunique())
+            df_curr[df_curr['#taxon'] == s]['#term'].nunique())
     species_labels = pd.Series(species_labels)
     df_curr['species'] = df_curr['#taxon'].apply(lambda x: species_labels[x])
     df_curr = df_curr.sort_values(by=['species', 'Algorithm'], ascending=[True, False])
@@ -492,7 +491,7 @@ def scatterplot_taxon_fmax(df, measure='fmax',
     plt.close()
 
 
-def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax', 
+def scatterplot_fmax(df_curr, term_num_ann, measure='fmax', 
         out_file=None, alg1="sinksource", alg2="localplus", **kwargs):
     # figure out which GO terms have the biggest difference for all species
     # plot a scatter plot of the differences across all GO terms
@@ -500,47 +499,47 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
     alg2 = kwargs['alg_names'].get(alg2, alg2)
     print("\nComparing %s values of %s and %s" % (measure, alg2, alg1))
     df_alg2 = df_curr[df_curr['Algorithm'] == alg2]
-    # key: taxon, goid tuple. Value: fmax
-    alg2_scores = dict(zip(zip(df_alg2['#taxon'], df_alg2['#goid']), df_alg2[measure]))
+    # key: taxon, term tuple. Value: fmax
+    alg2_scores = dict(zip(zip(df_alg2['#taxon'], df_alg2['#term']), df_alg2[measure]))
     df_alg1 = df_curr[df_curr['Algorithm'] == alg1]
-    alg1_scores = dict(zip(zip(df_alg1['#taxon'], df_alg1['#goid']), df_alg1[measure]))
+    alg1_scores = dict(zip(zip(df_alg1['#taxon'], df_alg1['#term']), df_alg1[measure]))
 
-    goid_diffs = {}
-    for taxon, goid in df_curr[['#taxon', '#goid']].values:
-        if (taxon, goid) not in alg1_scores and goid not in alg2_scores:
+    term_diffs = {}
+    for taxon, term in df_curr[['#taxon', '#term']].values:
+        if (taxon, term) not in alg1_scores and term not in alg2_scores:
             if kwargs.get('verbose'):
-                print("WARNING: %s not in both %s and %s." % (goid, alg1, alg2))
+                print("WARNING: %s not in both %s and %s." % (term, alg1, alg2))
             continue
-        if (taxon, goid) not in alg1_scores:
+        if (taxon, term) not in alg1_scores:
             if kwargs.get('verbose'):
-                print("WARNING: %s not in %s" % (goid, alg1))
+                print("WARNING: %s not in %s" % (term, alg1))
             continue
-        if (taxon, goid) not in alg2_scores:
+        if (taxon, term) not in alg2_scores:
             if kwargs.get('verbose'):
-                print("WARNING: %s not in %s." % (goid, alg2))
+                print("WARNING: %s not in %s." % (term, alg2))
             continue
-        goid_diff = alg1_scores[(taxon, goid)] - alg2_scores[(taxon, goid)]
-    #     goid_diff = (alg1_scores[(taxon, goid)] - alg2_scores[(taxon, goid)]) / float(alg2_scores[(taxon, goid)])
-        goid_diffs[(taxon, goid)] = goid_diff
-    print("\t%d %s, %d %s, %d diffs" % (len(alg2_scores), alg2, len(alg1_scores), alg1, len(goid_diffs)))
+        term_diff = alg1_scores[(taxon, term)] - alg2_scores[(taxon, term)]
+    #     term_diff = (alg1_scores[(taxon, term)] - alg2_scores[(taxon, term)]) / float(alg2_scores[(taxon, term)])
+        term_diffs[(taxon, term)] = term_diff
+    print("\t%d %s, %d %s, %d diffs" % (len(alg2_scores), alg2, len(alg1_scores), alg1, len(term_diffs)))
 
-    #goid_num_ann = dict(zip(df_summary['GO term'], df_summary['# positive examples']))
-    goid_taxon_num_ann = dict(zip(zip(df_alg2['#taxon'], df_alg2['#goid']), df_alg2['# test ann']))
+    #term_num_ann = dict(zip(df_summary['GO term'], df_summary['# positive examples']))
+    term_taxon_num_ann = dict(zip(zip(df_alg2['#taxon'], df_alg2['#term']), df_alg2['# test ann']))
     # also load the summary of the GO terms
-    if kwargs.get('goid_names_file'):
+    if kwargs.get('term_names_file'):
         #summary_file = "inputs/pos-neg/%s/pos-neg-10-summary-stats.tsv" % (curr_ev_codes)
-        print("reading %s" % (kwargs['goid_names_file']))
-        df_summary = pd.read_csv(kwargs['goid_names_file'], sep='\t')
+        print("reading %s" % (kwargs['term_names_file']))
+        df_summary = pd.read_csv(kwargs['term_names_file'], sep='\t')
         # should be 'GO term' but is sometimes '#GO term'. This is a quick hack
         first_col = df_summary.columns[0]
-        goid_names = dict(zip(df_summary[first_col], df_summary['GO term name']))
+        term_names = dict(zip(df_summary[first_col], df_summary['GO term name']))
     else:
-        goid_names = {g: '-' for t, g in goid_taxon_num_ann}
+        term_names = {g: '-' for t, g in term_taxon_num_ann}
 
     alg1_col = '%s %s'%(alg1,measure)
     alg2_col = '%s %s'%(alg2,measure)
     diff_col = '%s - %s %s'%(alg1, alg2, measure)
-    df = pd.DataFrame({alg2_col: alg2_scores, alg1_col: alg1_scores, diff_col: goid_diffs})
+    df = pd.DataFrame({alg2_col: alg2_scores, alg1_col: alg1_scores, diff_col: term_diffs})
     # print the # and % where SS is >, <, and = local+
     print("%s > %s: %d (%0.3f)"% (alg1, alg2, len(df[df[diff_col] > 0]), len(df[df[diff_col] > 0]) / float(len(df))))
     print("%s < %s: %d (%0.3f)"% (alg1, alg2, len(df[df[diff_col] < 0]), len(df[df[diff_col] < 0]) / float(len(df))))
@@ -548,18 +547,18 @@ def scatterplot_fmax(df_curr, goid_num_ann, measure='fmax',
 
     print("\nTop 5 difference in f-max:")
     print(''.join(["%s, %s\t%s\t%s\t%s\n" % (
-        t, g, goid_names[g], goid_num_ann[g], goid_diffs[t, g]) for t, g in sorted(
-        goid_diffs, key=goid_diffs.get, reverse=True)[:5]]))
+        t, g, term_names[g], term_num_ann[g], term_diffs[t, g]) for t, g in sorted(
+        term_diffs, key=term_diffs.get, reverse=True)[:5]]))
 
     stats_file = out_file.replace('.pdf','.tsv')
     if kwargs.get('forceplot') or not os.path.isfile(stats_file):
         print("Writing to %s" % (stats_file))
         with open(stats_file, 'w') as out:
-            out.write("#taxon\tgoid\tname\t# ann\ttaxon # ann\t%s\t%s\tdiff\n" % (alg2, alg1))
+            out.write("#taxon\tterm\tname\t# ann\ttaxon # ann\t%s\t%s\tdiff\n" % (alg2, alg1))
             out.write(''.join(["%s\n" % (
-                '\t'.join(str(x) for x in [t, g, goid_names[g], goid_num_ann[g], goid_taxon_num_ann[(t,g)],
-                alg2_scores[(t,g)], alg1_scores[(t,g)], goid_diffs[(t,g)]])
-            ) for t, g in sorted(goid_diffs, key=goid_diffs.get, reverse=True)]))
+                '\t'.join(str(x) for x in [t, g, term_names[g], term_num_ann[g], term_taxon_num_ann[(t,g)],
+                alg2_scores[(t,g)], alg1_scores[(t,g)], term_diffs[(t,g)]])
+            ) for t, g in sorted(term_diffs, key=term_diffs.get, reverse=True)]))
     else:
         print("Already exists: %s Use --forceplot to overwrite" % (stats_file))
 
@@ -650,8 +649,8 @@ def load_ann_obj(sparse_ann_file):
     loaded_data = np.load(sparse_ann_file, allow_pickle=True)
     dag_matrix = setup.make_csr_from_components(loaded_data['arr_0'])
     ann_matrix = setup.make_csr_from_components(loaded_data['arr_1'])
-    goids, prots = loaded_data['arr_2'], loaded_data['arr_3']
-    ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, goids, prots)
+    terms, prots = loaded_data['arr_2'], loaded_data['arr_3']
+    ann_obj = setup.Sparse_Annotations(dag_matrix, ann_matrix, terms, prots)
     return ann_obj
 
 
@@ -666,7 +665,7 @@ def store_ann_obj(ann_obj, sparse_ann_file, pos_only=False):
     ann_matrix_data = setup.get_csr_components(ann_obj.ann_matrix)
     np.savez_compressed(
         sparse_ann_file, dag_matrix_data, 
-        ann_matrix_data, ann_obj.goids, ann_obj.prots)
+        ann_matrix_data, ann_obj.terms, ann_obj.prots)
 
 
 def setup_parser(parser=None):

@@ -1,7 +1,7 @@
 import os
 import numpy as np
-from scipy import sparse
 from collections import defaultdict
+from scipy import sparse
 import fcntl
 from tqdm import tqdm
 import time
@@ -20,54 +20,56 @@ except:
 def evaluate_ground_truth(
         run_obj, eval_ann_obj, out_file,
         non_pos_as_neg_eval=False, taxon='-',
-        early_prec=None, write_prec_rec=False, 
-        append=False, **kwargs):
+        early_prec=None, rep=None, write_prec_rec=False, 
+        append=False, node_folds=None, **kwargs):
     """
     *early_prec*: A list of recall values for which to get the precision. 
         Each will get its own column in the output file
     *write_prec_rec*: For every term, write a file containing the 
         precision and recall at every positive and negative example
-    *term_ic_vec*: information content for each term in a vector
+    TODO: Update this function to write the rep and fold for each node to match the no-ontology branch
+    *rep*: index of current repetition if repeating CV multiple times.
+    *node_folds*: dictionary of the fold each pos/neg node belongs to
     """
-    goid_scores, goids = run_obj.goid_scores, run_obj.goids_to_run 
+    term_scores, terms = run_obj.term_scores, run_obj.terms_to_run 
     eval_ann_matrix, prots = eval_ann_obj.ann_matrix, eval_ann_obj.prots
-    score_goid2idx = run_obj.ann_obj.goid2idx
-    # only evaluate the terms that are in both the goid_scores matrix and the eval matrix
-    goids_to_eval = set(goids) & set(eval_ann_obj.goids)
-    if len(goids_to_eval) != len(goids) or len(goids_to_eval) != len(eval_ann_obj.goids):
-        print("\nINFO: only %d goids both have scores (/%d goids) and are in the eval matrix (/%d goids)" % (
-            len(goids_to_eval), len(goids), len(eval_ann_obj.goids)))
+    score_term2idx = run_obj.ann_obj.term2idx
+    # only evaluate the terms that are in both the term_scores matrix and the eval matrix
+    terms_to_eval = set(terms) & set(eval_ann_obj.terms)
+    if len(terms_to_eval) != len(terms) or len(terms_to_eval) != len(eval_ann_obj.terms):
+        print("\nINFO: only %d terms both have scores (/%d terms) and are in the eval matrix (/%d terms)" % (
+            len(terms_to_eval), len(terms), len(eval_ann_obj.terms)))
 
-    print("Computing fmax from ground truth for %d goterms" % (len(goids_to_eval)))
-    goid_stats = {}
-    goid_num_pos = {} 
-    goid_prec_rec = {}
+    print("Computing fmax from ground truth for %d terms" % (len(terms_to_eval)))
+    term_stats = {}
+    term_num_pos = {} 
+    term_prec_rec = {}
 
-    for goid in goids_to_eval:
-        score_idx = score_goid2idx[goid]
-        eval_idx = eval_ann_obj.goid2idx[goid]
-        # get the row corresponding to the current goids annotations 
-        goid_ann = eval_ann_matrix[eval_idx,:].toarray().flatten()
-        positives = np.where(goid_ann > 0)[0]
-        # to get the scores, map the current goid index to the
-        # index of the goid in the scores matrix
-        scores = goid_scores[score_idx]
+    for term in terms_to_eval:
+        score_idx = score_term2idx[term]
+        eval_idx = eval_ann_obj.term2idx[term]
+        # get the row corresponding to the current terms annotations 
+        term_ann = eval_ann_matrix[eval_idx,:].toarray().flatten()
+        positives = np.where(term_ann > 0)[0]
+        # to get the scores, map the current term index to the
+        # index of the term in the scores matrix
+        scores = term_scores[score_idx]
         # this is only needed for aptrank since it does not return a sparse matrix
         if sparse.issparse(scores):
             scores = scores.toarray().flatten()
-        goid_num_pos[goid] = len(positives)
+        term_num_pos[term] = len(positives)
         if len(positives) == 0:
             if kwargs['verbose']:
-                print("%s has 0 positives after restricting to nodes in the network. Skipping" % (goid))
+                print("%s has 0 positives after restricting to nodes in the network. Skipping" % (term))
             continue
         if non_pos_as_neg_eval is True:
             # leave everything not a positive as a negative
             negatives = None
         else:
             # alternatively, use the negatives from that species as the set of negatives
-            negatives = np.where(goid_ann < 0)[0]
+            negatives = np.where(term_ann < 0)[0]
             if len(negatives) == 0:
-                print("WARNING: 0 negatives for %s - %s. Skipping" % (goid, taxon))
+                print("WARNING: 0 negatives for %s - %s. Skipping" % (term, taxon))
                 continue
         prec, recall, fpr, pos_neg_stats = compute_eval_measures(
                 scores, positives, negatives=negatives, 
@@ -75,7 +77,7 @@ def evaluate_ground_truth(
         # Takes too much RAM to store these values for all terms 
         # so only store them when they will be written to a file
         if write_prec_rec:
-            goid_prec_rec[goid] = (prec, recall, pos_neg_stats)
+            term_prec_rec[term] = (prec, recall, pos_neg_stats)
         fmax = compute_fmax(prec, recall)
         avgp = compute_avgp(prec, recall)
         if len(prec) == 1:
@@ -92,43 +94,44 @@ def evaluate_ground_truth(
         eprec_vals = []
         if early_prec is not None:
             # compute the early precision at specified values
+            pred_ranks = [rank for _,_,rank,_,_ in pos_neg_stats] 
             eprec_vals = compute_early_prec(
-                prec, recall, pos_neg_stats, early_prec, goid_num_pos[goid])
+                prec, recall, recall_vals=early_prec, pred_ranks=pred_ranks, num_pos=term_num_pos[term])
         if kwargs['verbose']:
-            print("%s fmax: %0.4f" % (goid, fmax))
+            print("%s fmax: %0.4f" % (term, fmax))
 
         # also compute the smin on a term-by-term basis to see if its comparable to the fmax and auprc
         # make a copy of the matrices with just the single term, and then pass it to the compute_smin function
-        idx_vec = np.zeros(goid_scores.shape[0])
+        idx_vec = np.zeros(term_scores.shape[0])
         idx_vec[eval_idx] = 1
         diag = sparse.diags(idx_vec, shape=(len(idx_vec), len(idx_vec)))
         # set everything but the row of the curent term to 0
-        term_scores = diag.dot(goid_scores).asformat('csr')
+        term_scores = diag.dot(term_scores).asformat('csr')
         term_eval_mat = diag.dot(eval_ann_matrix).asformat('csr')
         # # make sure to store the scores the same way we would compute the smin over all values
         # term_scores2 = store_pos_neg_scores(term_scores, term_eval_mat, verbose=False)
         ru_vec, mi_vec, smin = compute_smin(term_scores, term_eval_mat, kwargs['term_ic_vec']) 
 
-        goid_stats[goid] = (fmax, avgp, auprc, auroc, smin, eprec_vals)
+        term_stats[term] = (fmax, avgp, auprc, auroc, smin, eprec_vals)
 
     # skip writing the output file if there's only one term specified
-    if write_prec_rec and len(goid_prec_rec) == 1:
+    if write_prec_rec and len(term_prec_rec) == 1:
         print("skipping writing %s" % (out_file))
     else:
         out_str = ""
         # Build the table of validation measures, sorted by # ann per term
-        for g in sorted(goid_stats, key=goid_num_pos.get, reverse=True):
-            fmax, avgp, auprc, auroc, smin, eprec_vals = goid_stats[g]
+        for g in sorted(term_stats, key=term_num_pos.get, reverse=True):
+            fmax, avgp, auprc, auroc, smin, eprec_vals = term_stats[g]
             # format the values so they'll be ready to be written to the output file
             early_prec_str = '\t'+'\t'.join("%0.4f" % (p) for p in eprec_vals) \
                              if len(eprec_vals) > 0 else ""
             out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s\n" % (
                 "%s\t"%taxon if taxon not in ["-", None] else "",
-                g, fmax, avgp, auprc, auroc, smin, goid_num_pos[g], early_prec_str)
+                g, fmax, avgp, auprc, auroc, smin, term_num_pos[g], early_prec_str)
         # don't re-write the header if this file is being appended to
         if not os.path.isfile(out_file) or not append:
             print("Writing results to %s\n" % (out_file))
-            header_line = "#goid\tfmax\tavgp\tauprc\tauroc\tsmin"
+            header_line = "#term\tfmax\tavgp\tauprc\tauroc\tsmin"
             if taxon not in ['-', None]:
                 header_line = "#taxon\t%s\t# test ann" % (header_line)
             else:
@@ -145,17 +148,17 @@ def evaluate_ground_truth(
             fcntl.flock(out, fcntl.LOCK_UN)
 
     if write_prec_rec:
-        goid = list(goid_prec_rec.keys())[0]
+        term = list(term_prec_rec.keys())[0]
         out_file_pr = out_file.replace('.txt', "prec-rec%s%s.txt" % (
             taxon if taxon not in ['-', None] else '',
-            '-%s'%(goid) if len(goid_prec_rec) == 1 else ""))
+            '-%s'%(term) if len(term_prec_rec) == 1 else ""))
         print("writing prec/rec to %s" % (out_file_pr))
         with open(out_file_pr, 'w') as out:
-            out.write("#goid\tprec\trec\tnode\tscore\tidx\tpos/neg\n")
-            #for goid, (prec, rec, pos_neg_stats) in sorted(goid_prec_rec.items(), key=goid_num_pos.get, reverse=True):
-            for goid, (prec, rec, pos_neg_stats) in goid_prec_rec.items():
+            out.write("#term\tprec\trec\tnode\tscore\tidx\tpos/neg\n")
+            #for term, (prec, rec, pos_neg_stats) in sorted(term_prec_rec.items(), key=term_num_pos.get, reverse=True):
+            for term, (prec, rec, pos_neg_stats) in term_prec_rec.items():
                 out.write(''.join(["%s\t%0.4f\t%0.4f\t%s\t%0.4e\t%d\t%d\n" % (
-                    goid, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
+                    term, p, r, prots[n], s, idx, pos_neg) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
 
 
 def compute_eval_measures(scores, positives, negatives=None, 
@@ -281,7 +284,23 @@ def compute_auprc_auroc(pos_scores, neg_scores):
     return float(np.asarray(auprc)[0]), float(np.asarray(auroc)[0])
 
 
-def compute_early_prec(prec, rec, pos_neg_stats, recall_vals, num_pos):
+def compute_early_prec(prec, rec, recall_vals=[0.1], pred_ranks=None, num_pos=None):
+    """
+    Compute the precision at specific values of recall
+    *prec*: list of precision values
+    *rec*: list of recall values
+    *recall_vals*: list of recall points for which to compute precision.  
+        If 'k' is with the value (e.g., "k2"), then find the precision after k*num_pos predictions have been made
+
+    The following two options are only used if 'k' recall vals are passed in:
+    *pred_ranks*: list that gives the prediction rank of the values in *prec* and *rec*, 
+        which would be used to find the specific point where k*num_pos predictions lie on the prec/rec curve
+        For example, suppose num_pos=10, num_neg=30, and num_nodes=100. *prec*, *rec*, and *pred_ranks* would each have 40 values, 
+        and *pred_ranks* would contain the rank of the pos and neg nodes among the 100 nodes.
+    *num_pos*: original number of positive examples for this term
+
+    *returns*: A list of precision values at the specified *recall_vals*
+    """
     early_prec_values = []
     for curr_recall in recall_vals:
         # if a k recall is specified, get the precision at the recall which is k * # ann in the left-out species
@@ -289,9 +308,9 @@ def compute_early_prec(prec, rec, pos_neg_stats, recall_vals, num_pos):
             k_val = float(curr_recall.replace('k',''))
             num_nodes_to_get = k_val * num_pos 
             # the pos_neg_stats tracks the prec for every node.
-            # So find the precision value for first node with an index >= (k * # ann)
-            for idx, (_, _, _, _, curr_num_pos) in enumerate(pos_neg_stats): 
-                if curr_num_pos >= num_nodes_to_get:
+            # So find the precision value for first node with a rank >= (k * # ann)
+            for idx, rank in enumerate(pred_ranks): 
+                if rank >= num_nodes_to_get:
                     break
             # get the precision at the corresponding index
             p = prec[idx]
@@ -316,7 +335,7 @@ def compute_smin(all_pos_neg_scores, eval_mat, term_ic_vec, out_file=None, verbo
         print("WARNING: 0 scores with which to compute the smin. Returning np.nan")
         return [], [], np.nan
 
-    # get the annotation matrix for only the goids_to_eval
+    # get the annotation matrix for only the terms_to_eval
     pos_mat = (eval_mat > 0).astype(int)
     neg_mat = (eval_mat < 0).astype(int)
     # number of prots is the number of proteins with at least one annotation
@@ -377,18 +396,18 @@ def compute_smin(all_pos_neg_scores, eval_mat, term_ic_vec, out_file=None, verbo
     return ru_vec, mi_vec, smin
 
 
-def compute_remaining_uncertainty(goid_scores, weighted_pos_mat, num_prots, tau):
+def compute_remaining_uncertainty(term_scores, weighted_pos_mat, num_prots, tau):
     """
     Will compute the fraction of positive examples that are "missed" (i.e., false negative)
         at the current score cutoff *tau*, weighted by the information content for each term
 
-    *goid_scores*: matrix of term x prot prediction scores. 
+    *term_scores*: matrix of term x prot prediction scores. 
     *pos_mat*: matrix of term x prot positive examples
     *tau*: score cutoff
     """
     # Building the neg_pred matrix like this can be expensive since all 0 values would be changed to 1 
-    #neg_pred = (goid_scores < tau).astype(int)
-    S = goid_scores
+    #neg_pred = (term_scores < tau).astype(int)
+    S = term_scores
     # To get the matrix of scores < tau, we're going to instead remove the
     # parts of the matrix that are > tau.
     # This is an array of the nonzero data indices that pass this filter
@@ -413,25 +432,25 @@ def compute_remaining_uncertainty(goid_scores, weighted_pos_mat, num_prots, tau)
     num_nonzero = len(neg_pred.data)
 
     # this could be faster and simpler:
-    # # pos_pred = goid_scores.copy()
-    # orig_scores = goid_scores.data
-    # goid_scores.data = (goid_scores.data < tau).astype(int)
-    # ru = (1/float(num_prots)) * goid_scores.multiply(weighted_pos_mat).sum()
-    # num_nonzero = np.count_nonzero(goid_scores.data)
+    # # pos_pred = term_scores.copy()
+    # orig_scores = term_scores.data
+    # term_scores.data = (term_scores.data < tau).astype(int)
+    # ru = (1/float(num_prots)) * term_scores.multiply(weighted_pos_mat).sum()
+    # num_nonzero = np.count_nonzero(term_scores.data)
     # print("new ru: %0.2f. %2e time. num_nonzero: %s, tau: %s. " % (ru, time.process_time() - start_time2, num_nonzero, tau))
-    # goid_scores.data = orig_scores 
+    # term_scores.data = orig_scores 
 
     return ru, num_nonzero
 
 
-def compute_misinformation(goid_scores, weighted_neg_mat, num_prots, tau):
+def compute_misinformation(term_scores, weighted_neg_mat, num_prots, tau):
     """
     Will compute the fraction of negative examples that are found (i.e., false positives)
         at the current score cutoff *tau*, weighted by the information content for each term
     """
     # Building the pos_pred matrix like this can be expensive since all 0 values would be changed to 1 if tau < 0
-    #pos_pred = (goid_scores > tau).astype(int)
-    S = goid_scores
+    #pos_pred = (term_scores > tau).astype(int)
+    S = term_scores
     # To get the matrix of scores > tau, we're going to instead remove the
     # parts of the matrix that are < tau.
     # This is an array of the nonzero data indices that pass this filter
@@ -453,13 +472,13 @@ def compute_misinformation(goid_scores, weighted_neg_mat, num_prots, tau):
     # also return the number of nonzero entries in the matrix
     num_nonzero = len(pos_pred.data)
 
-    # #pos_pred = goid_scores.copy()
-    # orig_scores = goid_scores.data
-    # goid_scores.data = (goid_scores.data > tau).astype(int)
-    # mi = (1/float(num_prots)) * goid_scores.multiply(weighted_neg_mat).sum()
+    # #pos_pred = term_scores.copy()
+    # orig_scores = term_scores.data
+    # term_scores.data = (term_scores.data > tau).astype(int)
+    # mi = (1/float(num_prots)) * term_scores.multiply(weighted_neg_mat).sum()
     # print("new mi: %0.2f. %0.2e time, nnz: %s, tau: %s" % (mi, time.process_time() - start_time2, num_nonzero, tau))
-    # num_nonzero = np.count_nonzero(goid_scores.data)
-    # goid_scores.data = orig_scores 
+    # num_nonzero = np.count_nonzero(term_scores.data)
+    # term_scores.data = orig_scores 
 
     return mi, num_nonzero
 
@@ -477,14 +496,14 @@ def compute_information_content(ann_obj):
     return -np.log(ic_vec)
 
 
-def compute_prec_rec_mat(goid_scores, pos_mat, neg_mat, tau):
+def compute_prec_rec_mat(term_scores, pos_mat, neg_mat, tau):
     """
     Compute the precision and recall for a given score cutoff tau
     """
     # first get all the predicted positives which are nodes with a score > tau
     # This can be expensive since all 0 values would be changed to 1 
-    #pos_pred = (goid_scores > tau).astype(int)
-    S = goid_scores
+    #pos_pred = (term_scores > tau).astype(int)
+    S = term_scores
     # To get the matrix of scores > tau, we're going to instead remove the
     # parts of the matrix that are < tau.
     # This is an array of the nonzero data indices that pass this filter
@@ -514,10 +533,10 @@ def compute_prec_rec_mat(goid_scores, pos_mat, neg_mat, tau):
     return precision, recall
 
 
-def store_pos_neg_scores(goid_scores, test_ann_mat, verbose=True):
+def store_pos_neg_scores(term_scores, test_ann_mat, verbose=True):
     # just store the scores of the positive and negative examples
     test_idx_mat = test_ann_mat.astype(bool).astype(int)
-    pos_neg_scores = goid_scores.multiply(test_idx_mat)
+    pos_neg_scores = term_scores.multiply(test_idx_mat)
     if verbose:
         print("\tmax score: %s, min score: %s, num scores: %s" % (pos_neg_scores.max(), pos_neg_scores.min(), len(pos_neg_scores.data)))
     return pos_neg_scores
@@ -528,8 +547,8 @@ def store_terms_eval_mat(run_obj, ann_obj, test_ann_mat, specific_terms=None):
     if specific_terms is not None:
         print("\tstoring eval_mat for %d terms" % (len(specific_terms)))
         # also store a version of the test ann mat that has only the most specific terms
-        terms_vec = np.zeros(len(ann_obj.goids))
-        terms_vec[[ann_obj.goid2idx[t] for t in specific_terms]] = 1
+        terms_vec = np.zeros(len(ann_obj.terms))
+        terms_vec[[ann_obj.term2idx[t] for t in specific_terms]] = 1
         terms_I = sparse.diags(terms_vec)
         # multply by a diagonal matrix with 1s at the specific terms to limit the test ann mat to those terms
         test_ann_mat_sp_terms = terms_I.dot(test_ann_mat)

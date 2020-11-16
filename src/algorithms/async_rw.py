@@ -1,13 +1,9 @@
 
 #import numpy as np
-import src.algorithms.alg_utils as alg_utils
-from scipy.sparse import csc_matrix, lil_matrix, vstack, hstack, eye
-from scipy import sparse as sp
-from scipy.sparse.linalg import spsolve
 import numpy as np
 import time
 #import sys
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
 __author__ = "Jeff Law"
 # python implementation of the Asynchronous Random Walk algorithm 

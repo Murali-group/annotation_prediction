@@ -1,8 +1,6 @@
 
 import time
-#import src.algorithms.fastsinksource as fss
-import src.algorithms.fastsinksource_runner as fss_runner
-#import src.algorithms.alg_utils as alg_utils
+from . import fastsinksource_runner as fss_runner
 #from tqdm import tqdm, trange
 from scipy import sparse as sp
 import numpy as np

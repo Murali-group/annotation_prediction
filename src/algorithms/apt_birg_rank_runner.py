@@ -1,22 +1,22 @@
 
 import time
-#import src.algorithms.aptrank_birgrank.run_birgrank as run_birgrank
-import src.algorithms.aptrank_birgrank.birgrank as birgrank
-#import src.algorithms.aptrank_birgrank.aptrank as aptrank
-import src.algorithms.alg_utils as alg_utils
-import src.setup_sparse_networks as setup
 from scipy import sparse as sp
 import numpy as np
 #from tqdm import tqdm, trange
+
+from .aptrank_birgrank import birgrank as birgrank
+#import src.algorithms.aptrank_birgrank.aptrank as aptrank
+from . import alg_utils as alg_utils
+from .. import setup_sparse_networks as setup
 
 
 def setupInputs(run_obj):
     # extract the variables out of the annotation object
     run_obj.ann_matrix = run_obj.ann_obj.ann_matrix
     run_obj.hierarchy_mat = run_obj.ann_obj.dag_matrix
-    run_obj.goids = run_obj.ann_obj.goids
-    goid2idx = run_obj.ann_obj.goid2idx
-    terms_to_run_idx = [goid2idx[g] for g in run_obj.goids_to_run]
+    run_obj.terms = run_obj.ann_obj.terms
+    term2idx = run_obj.ann_obj.term2idx
+    terms_to_run_idx = [term2idx[g] for g in run_obj.terms_to_run]
 
     # setup the matrices
     if run_obj.kwargs.get('verbose'):
@@ -33,7 +33,7 @@ def setupInputs(run_obj):
         # (i.e., most specific or leaf terms)
         if run_obj.kwargs.get('verbose'):
             print("\tlimiting annotations to %d terms" % (len(terms_to_run_idx)))
-        limit_to_terms = np.zeros(len(run_obj.goids))
+        limit_to_terms = np.zeros(len(run_obj.terms))
         limit_to_terms[terms_to_run_idx] = 1
         num_pos = len(run_obj.pos_mat.data)
         # select the given rows by multiplying by an identity matrix with 1s at the indices of specified terms
@@ -106,7 +106,7 @@ def run(run_obj):
     Function to run AptRank and BirgRank
     """
     params_results = run_obj.params_results
-    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
+    term_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     P, hierarchy_mat, pos_mat = run_obj.P, run_obj.hierarchy_mat, run_obj.pos_mat
     alg, params, br_lambda = run_obj.name, run_obj.params, run_obj.params['lambda']
 
@@ -142,15 +142,15 @@ def run(run_obj):
     alg_name = "%s%s" % (alg, run_obj.params_str)
     params_results["%s_process_time"%alg_name] += process_time
 
-    # limit the scores matrix to only the GOIDs for which we want the scores
-    if len(run_obj.goids_to_run) < goid_scores.shape[0]:
-        for goid in run_obj.goids_to_run:
-            idx = run_obj.ann_obj.goid2idx[goid]
-            goid_scores[idx] = Xh[idx]
+    # limit the scores matrix to only the TERMs for which we want the scores
+    if len(run_obj.terms_to_run) < term_scores.shape[0]:
+        for term in run_obj.terms_to_run:
+            idx = run_obj.ann_obj.term2idx[term]
+            term_scores[idx] = Xh[idx]
     else:
-        goid_scores = Xh
+        term_scores = Xh
 
-    run_obj.goid_scores = goid_scores
+    run_obj.term_scores = term_scores
     run_obj.params_results = params_results
     return
 
