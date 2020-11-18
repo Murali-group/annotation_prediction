@@ -20,17 +20,20 @@ from . import eval_utils
 
 
 def eval_loso(
-        alg_runners, ann_obj, taxon_file, eval_ann_obj=None, 
+        alg_runners, ann_obj, taxon_prot_file, eval_ann_obj=None, 
         taxons=None, only_taxon_file=None, **kwargs):
     """
     *alg_runners*: 
         Each is expected to have the same ann_obj, prots, and terms
+    *ann_obj*: annotation object that has the sparse annotations (including negative examples as -1),
+        the list of term IDs giving the index of each term, a mapping from term to index,
+        and a hierarchy of the terms
     *eval_ann_obj*: annotation object that will only be used for evaluation
-    *taxon_file*: 
-    *only_taxon_file*: 
+    *taxon_prot_file*: a tab-delimited file indicating the NCBI taxononmy ID (2nd col) for each gene/UniProt ID (1st col)
+    *only_taxon_file*: a file containing the taxon IDs to evaluate. Also used to get the names of the species
     """
 
-    species_to_uniprot_idx = get_uniprot_species(taxon_file, ann_obj)
+    species_to_uniprot_idx = get_uniprot_species(taxon_prot_file, ann_obj)
     selected_species, taxons = get_selected_species(species_to_uniprot_idx, only_taxon_file, taxons)
 
     # change the taxons to be all. Then nothing will be left out
@@ -77,7 +80,7 @@ def eval_loso(
             print("\tskipping")
             continue
         if kwargs.get('sp_leaf_terms_only'):
-            leaf_terms = go_utils.get_most_specific_terms(sp_terms, ann_obj=ann_obj)
+            leaf_terms = ont_utils.get_most_specific_terms(sp_terms, ann_obj=ann_obj)
             print("\t'sp_leaf_terms_only': %d / %d terms are most specific, or leaf terms" % (len(leaf_terms), len(sp_terms)))
             sp_terms = leaf_terms 
 
@@ -124,9 +127,9 @@ def eval_loso(
     return params_results
 
 
-def get_uniprot_species(taxon_file, ann_obj):
-    print("Getting species of each prot from %s" % (taxon_file))
-    uniprot_to_species = utils.readDict(taxon_file, 1,2)
+def get_uniprot_species(taxon_prot_file, ann_obj):
+    print("Getting species of each prot from %s" % (taxon_prot_file))
+    uniprot_to_species = utils.readDict(taxon_prot_file, 1,2)
     # also build the reverse, but with the node idx instead of the UniProt ID
     node2idx = {n: i for i, n in enumerate(ann_obj.prots)}
     global species_to_uniprot_idx
@@ -277,16 +280,13 @@ def run_and_eval_algs(
 
 def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
                     eval_ann_obj=None, keep_ann=False, 
-                    non_pos_as_neg_eval=False, eval_terms_with_left_out_only=False,
+                    non_pos_as_neg_eval=False, 
                     oracle=False, num_test_cutoff=10, **kwargs):
     """
     Training positives are removed from testing positives, and train pos and neg are removed from test neg
         I don't remove training negatives from testing positives, because not all algorithms use negatives
     *t*: species to be left out. If t is None or 'all', then no species will be left out, and keep_ann must be True.
     *eval_ann_obj*: 
-    *eval_terms_with_left_out_only*: if eval_ann_obj is given and keep_ann is False, 
-        only evaluate GO terms that have at least 2% of annotations. 
-        Useful to speed-up processing for term-based algorithms
     *oracle*: remove train negatives that are actually test positives
     *num_test_cutoff*: minimum number of annotations for each go term in the left-out species 
     """
@@ -320,12 +320,6 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
                 eval_pos, eval_neg = alg_utils.get_term_pos_neg(eval_ann_obj.ann_matrix, eval_ann_obj.term2idx[term])
                 eval_pos = set(list(eval_pos))
                 eval_neg = set(list(eval_neg))
-            # if this species has little-to-no annotations that are being left-out, then we can skip it
-            #if not keep_ann and eval_terms_with_left_out_only:
-                ## If the percentage of left-out ann is less than 2%, then skip it
-                #if (len(ann_pos) - len(train_pos)) / float(len(train_pos)) < .02:
-                #    skipped_eval_no_left_out_ann += 1 
-                #    continue
         if t is None:
             test_pos = eval_pos
             test_neg = eval_neg
@@ -361,9 +355,6 @@ def leave_out_taxon(t, ann_obj, species_to_uniprot_idx,
            (len(train_neg) == 0 or len(test_neg) == 0):
             continue
         sp_terms.append(term) 
-
-    #if eval_ann_matrix is not None and not keep_ann and eval_terms_with_left_out_only:
-    #    print("\t%d terms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
 
     return train_ann_mat.tocsr(), test_ann_mat.tocsr(), sp_terms
 
@@ -411,9 +402,6 @@ def split_ann_mat_train_test(
            (num_train_neg_per_term[i] == 0 or num_test_neg_per_term[i] == 0):
             continue
         terms_passing_cutoff.append(terms[i])
-
-    #if eval_ann_matrix is not None and not keep_ann and eval_terms_with_left_out_only:
-    #    print("\t%d terms skipped_eval_no_left_out_ann (< 0.02 train ann in the left-out species)" % (skipped_eval_no_left_out_ann))
 
     return train_mat, test_mat, terms_passing_cutoff
 
