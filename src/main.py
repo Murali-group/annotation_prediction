@@ -88,7 +88,7 @@ def setup_opts():
     group.add_argument('--factor-pred-to-write', '-N', type=float, 
             help="Write the predictions <factor>*num_pos for each term to file. " +
             "For example, if the factor is 2, a term with 5 annotations would get the nodes with the top 10 prediction scores written to file.")
-    group.add_argument('--postfix', type=str, 
+    group.add_argument('--postfix', type=str, default="",
             help="String to add to the end of the output file name(s)")
     group.add_argument('--forcealg', action="store_true",
             help="Force re-running algorithms if the output files already exist")
