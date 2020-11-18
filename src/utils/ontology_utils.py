@@ -138,7 +138,7 @@ def get_most_specific_terms(terms, dag=None, ann_obj=None):
     if dag is None:
         G = nx.DiGraph()
         dag = nx.from_scipy_sparse_matrix(ann_obj.dag_matrix, create_using=G)
-        nx.relabel_nodes(dag, {i:t for i,t in enumerate(ann_obj.goids)}, copy=False)
+        nx.relabel_nodes(dag, {i:t for i,t in enumerate(ann_obj.terms)}, copy=False)
     ancestor_terms = set()
     for t in terms:
         if t in ancestor_terms:
