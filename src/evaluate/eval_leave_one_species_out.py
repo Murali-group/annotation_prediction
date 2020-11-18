@@ -37,7 +37,7 @@ def eval_loso(
     selected_species, taxons = get_selected_species(species_to_uniprot_idx, only_taxon_file, taxons)
 
     # change the taxons to be all. Then nothing will be left out
-    if kwargs['keep_ann']:
+    if kwargs.get('keep_ann'):
         if eval_ann_obj is None:
             print("\nERROR: an evaluation matrix (i.e., pos_neg_file_eval) must be given with the 'keep_ann' option")
             sys.exit(1)
@@ -231,7 +231,7 @@ def run_and_eval_algs(
     # setup the output file. Could be used by the runners to write temp files or other output files
     exp_type="loso" 
     postfix = kwargs.get("postfix", "")
-    if kwargs['keep_ann']:
+    if kwargs.get('keep_ann'):
         exp_type = "eval-per-taxon" 
     out_file = "%s/%s%s%s.txt" % (
         run_obj.out_dir, exp_type, run_obj.params_str, postfix)
@@ -244,7 +244,7 @@ def run_and_eval_algs(
 
     # if predictions were already generated, and taxon is set to 'all', then use those.
     # otherwise, generate the prediction scores
-    if kwargs['keep_ann'] and run_obj.term_scores.getnnz() != 0:
+    if kwargs.get('keep_ann') and run_obj.term_scores.getnnz() != 0:
         print("Using already computed scores")
     else:
         # replace the ann_obj in the runner with the current training annotations  
