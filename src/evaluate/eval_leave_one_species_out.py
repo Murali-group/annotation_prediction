@@ -21,7 +21,7 @@ from . import eval_utils
 
 def eval_loso(
         alg_runners, ann_obj, taxon_prot_file, eval_ann_obj=None, 
-        taxons=None, only_taxon_file=None, **kwargs):
+        taxons=None, target_taxons_file=None, **kwargs):
     """
     *alg_runners*: 
         Each is expected to have the same ann_obj, prots, and terms
@@ -30,11 +30,11 @@ def eval_loso(
         and a hierarchy of the terms
     *eval_ann_obj*: annotation object that will only be used for evaluation
     *taxon_prot_file*: a tab-delimited file indicating the NCBI taxononmy ID (2nd col) for each gene/UniProt ID (1st col)
-    *only_taxon_file*: a file containing the taxon IDs to evaluate. Also used to get the names of the species
+    *target_taxons_file*: a file containing the taxon IDs to evaluate. Also used to get the names of the species
     """
 
     species_to_uniprot_idx = get_uniprot_species(taxon_prot_file, ann_obj)
-    selected_species, taxons = get_selected_species(species_to_uniprot_idx, only_taxon_file, taxons)
+    selected_species, taxons = get_selected_species(species_to_uniprot_idx, target_taxons_file, taxons)
 
     # change the taxons to be all. Then nothing will be left out
     if kwargs.get('keep_ann'):
@@ -141,11 +141,11 @@ def get_uniprot_species(taxon_prot_file, ann_obj):
     return species_to_uniprot_idx
 
 
-def get_selected_species(species_to_uniprot_idx, only_taxon_file=None, taxons=None):
+def get_selected_species(species_to_uniprot_idx, target_taxons_file=None, taxons=None):
     selected_species = {t: '-' for t in species_to_uniprot_idx}
-    if only_taxon_file is not None:
-        selected_species = utils.readDict(only_taxon_file, 1, 2)
-    # if not taxon IDs were specified, then use the either the only_taxon_file, or all of the taxon  
+    if target_taxons_file is not None:
+        selected_species = utils.readDict(target_taxons_file, 1, 2)
+    # if not taxon IDs were specified, then use the either the target_taxons_file, or all of the taxon  
     if taxons is None:
         taxons = selected_species.keys()
     else:
