@@ -106,11 +106,11 @@ def evaluate_ground_truth(
         idx_vec[eval_idx] = 1
         diag = sparse.diags(idx_vec, shape=(len(idx_vec), len(idx_vec)))
         # set everything but the row of the curent term to 0
-        term_scores = diag.dot(term_scores).asformat('csr')
-        term_eval_mat = diag.dot(eval_ann_matrix).asformat('csr')
+        curr_term_scores = diag.dot(term_scores).asformat('csr')
+        curr_term_eval_mat = diag.dot(eval_ann_matrix).asformat('csr')
         # # make sure to store the scores the same way we would compute the smin over all values
         # term_scores2 = store_pos_neg_scores(term_scores, term_eval_mat, verbose=False)
-        ru_vec, mi_vec, smin = compute_smin(term_scores, term_eval_mat, kwargs['term_ic_vec']) 
+        ru_vec, mi_vec, smin = compute_smin(curr_term_scores, curr_term_eval_mat, kwargs['term_ic_vec']) 
 
         term_stats[term] = (fmax, avgp, auprc, auroc, smin, eprec_vals)
 
