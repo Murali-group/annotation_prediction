@@ -21,6 +21,12 @@ def setup_config_variables(config_map, **kwargs):
     Function to setup the various args specified in kwargs
     """
     input_settings = config_map['input_settings']
+    # if 'dataset_default_settings' are set, then copy them to the individual datasets
+    if 'dataset_default_settings' in input_settings and 'datasets' in input_settings:
+        for dataset in input_settings['datasets']:
+            for key, val in input_settings['dataset_default_settings'].items():
+                if key not in dataset:
+                    dataset[key] = val
     input_dir = input_settings['input_dir']
     alg_settings = config_map['algs']
     output_settings = config_map['output_settings']
