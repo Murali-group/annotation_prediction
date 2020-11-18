@@ -20,6 +20,7 @@ available_weight_methods = ['swsn', 'gmw', 'gmw2008', 'add']
 
 # my local imports
 from .utils import file_utils as utils
+from .utils import ontology_utils as ont_utils
 from .utils.string_utils import full_column_names, STRING_NETWORKS
 from .algorithms import alg_utils as alg_utils
 from .weight_networks.findKernelWeights import findKernelWeights
@@ -152,7 +153,7 @@ class Sparse_Networks:
 class Sparse_Annotations:
     """
     An object to hold the sparse annotations (including negative examples as -1),
-        the list of GO term IDs giving the index of each term, and a mapping from term to index
+        the list of term IDs giving the index of each term, and a mapping from term to index
     """
     # TODO add the DAG matrix
     def __init__(self, dag_matrix, ann_matrix, terms, prots):
@@ -484,7 +485,7 @@ def create_sparse_ann_and_align_to_net(
         obo_file, pos_neg_file, sparse_ann_file, net_prots,
         forced=False, verbose=False, **kwargs):
     """
-    Wrapper around create_sparse_ann_file that also runs Youngs Negatives (potentially RAM heavy)
+    Wrapper around create_sparse_ann_file that also runs Youngs Negatives
     and aligns the ann_matrix to a given network, both of which can be time consuming
     and stores those results to a file
     """ 
@@ -537,7 +538,7 @@ def create_sparse_ann_file(
         ann_matrix, terms, prots = setup_sparse_annotations(pos_neg_file)
 
         # now read the term hierarchy DAG
-        # parse the go_dags first as it also sets up the term_to_category dictionary
+        # parse the dags first as it also sets up the term_to_category dictionary
         dag_matrix, dag_terms = setup_obo_dag_matrix(obo_file, terms)
         dag_terms2idx = {g: i for i, g in enumerate(dag_terms)}
         # realign the terms in the dag_matrix to the terms in the annotation matrix
@@ -573,9 +574,9 @@ def setup_obo_dag_matrix(obo_file, terms):
         the sub-ontology which has the given terms. Currently just returns the DAG for the first term. 
         TODO allow for multiple
     """
-    go_dags = go_examples.parse_obo_file_and_build_dags(obo_file)
+    dags = ont_utils.parse_obo_file_and_build_dags(obo_file)
     dag_matrix = None
-    for h, dag in go_dags.items():
+    for h, dag in dags.items():
         t = list(terms)[0]
         if not dag.has_node(t):
             continue
@@ -587,24 +588,24 @@ def setup_obo_dag_matrix(obo_file, terms):
         return dag_matrix, terms
 
 
-def build_hierarchy_matrix(go_dag, terms, h=None):
+def build_hierarchy_matrix(dag, terms, h=None):
     """
+    *dag*: networkx graph of the relationships in the ontology as edges and the terms as nodes
     *terms*: the leaf terms to use to get a sub-graph of the DAG.
         All ancestor terms will be included in the DAG
     """
 
-    # UPDATE: limit to only the GO terms in R
-    print("Limiting DAG to only the %d %s GO terms that have at least 1 annotation (assuming annotations already propagated up the DAG)" % (len(terms), h))
+    print("Limiting DAG to only the %d %s terms that have at least 1 annotation (assuming annotations already propagated up the DAG)" % (len(terms), h))
     ancestor_terms = set()
     for term in terms:
         # if we already have the ancestors of this term, then skip
         if term in ancestor_terms:
             continue
-        ancestor_terms.update(descendants(go_dag, term))
+        ancestor_terms.update(nx.descendants(dag, term))
     ancestor_terms.update(terms)
     terms_list = sorted(ancestor_terms)
 
-    G = nx.subgraph(go_dag, ancestor_terms)
+    G = nx.subgraph(dag, ancestor_terms)
     if h is not None:
         print("\t%s DAG has %d nodes and %d edges" % (h, G.number_of_nodes(), G.number_of_edges()))
     else:
@@ -875,7 +876,7 @@ def weight_SWSN(ann_matrix, sparse_nets=None, normalized_nets=None, net_names=No
 
     if verbose:
         utils.print_memory_usage()
-    print("Weighting networks for %d different GO terms" % (curr_ann_mat.shape[0]))
+    print("Weighting networks for %d different terms" % (curr_ann_mat.shape[0]))
     print("Running simultaneous weights with specific negatives")
     start_time = time.process_time()
     alpha, indices = combineNetworksSWSN(curr_ann_mat, normalized_nets, verbose=verbose) 
