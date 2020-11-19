@@ -19,6 +19,7 @@ def setupInputs(run_obj):
 
     if run_obj.net_obj.weight_swsn:
         W, process_time = run_obj.net_obj.weight_SWSN(run_obj.ann_matrix)
+        run_obj.P = alg_utils._net_normalize(W)
         run_obj.params_results['%s_weight_time'%(run_obj.name)] += process_time
     elif run_obj.net_obj.weight_gmw:
         # this will be handled on a term by term basis
