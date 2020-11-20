@@ -132,15 +132,15 @@ class Sparse_Networks:
         return W, process_time, weights
 
     def save_net(self, out_file):
-        print("Writing %s" % (out_file))
+        print("Writing %snetwork to %s" % ('SWSN combined ' if self.weight_swsn else '', out_file))
         utils.checkDir(os.path.dirname(out_file))
         if out_file.endswith('.npz'):
             # when the net was loaded, the idx file was already written
             # so no need to write it again
-            sp.save_npz(out_file, self.W_SWSN)
+            sp.save_npz(out_file, self.W)
         else:
             # convert the adjacency matrix to an edgelist
-            G = nx.from_scipy_sparse_matrix(self.W_SWSN)
+            G = nx.from_scipy_sparse_matrix(self.W)
             idx2node = {i: n for i, n in enumerate(self.nodes)}
             # see also convert_node_labels_to_integers
             G = nx.relabel_nodes(G, idx2node, copy=False)
