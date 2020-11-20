@@ -9,14 +9,12 @@ e.g., to the Gene Ontology (GO) and to the Human Phenotype Ontology(HPO).
 - Required R packages: PPROC
 
 ```
-conda create -n fastsinksource python=3.7 r=3.6
-conda activate fastsinksource
-pip install -r requirements.txt
+conda create -n ann-pred python=3.7 r=3.6 --file requirements.txt
+conda activate ann-pred
 ```
 To install the R packages:
 ```
 R -e "install.packages('https://cran.r-project.org/src/contrib/PRROC_1.3.1.tar.gz', type = 'source')"
-conda install -c bioconda bioconductor-clusterprofiler
 ```
 
 ## Usage 
