@@ -1,6 +1,6 @@
-networkx==2.1
-numpy==1.17.2
-scipy==1.3.0
+networkx==2.4
+numpy==1.18.5
+scipy==1.4.1
 pandas==1.0.4
 # package to parse the GO OBO file
 obonet==0.2.5
