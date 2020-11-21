@@ -144,7 +144,19 @@ def get_uniprot_species(taxon_prot_file, ann_obj):
 def get_selected_species(species_to_uniprot_idx, target_taxons_file=None, taxons=None):
     selected_species = {t: '-' for t in species_to_uniprot_idx}
     if target_taxons_file is not None:
-        selected_species = utils.readDict(target_taxons_file, 1, 2)
+        # this fails if there is only 1 column
+        #selected_species = utils.readDict(target_taxons_file, 1, 2)
+        selected_species = {}
+        with open(target_taxons_file, 'r') as f:
+            for line in f:
+                if line[0] == "#":
+                    continue
+            line = line.rstrip().split('\t')
+            taxon = line[0]
+            species_name = '-'
+            if len(line) > 1:
+                species_name = line[1]
+            selected_species[taxon] = species_name
     # if not taxon IDs were specified, then use the either the target_taxons_file, or all of the taxon  
     if taxons is None:
         taxons = selected_species.keys()
