@@ -45,4 +45,4 @@ python plot.py --config config.yaml --box --measure fmax
 ## Cite
 If you use FastSinkSource or other methods in this package, please cite:
 
-Jeffrey N. Law, Shiv D. Kale, and T. M. Murali. [Accurate and Efficient Gene Function Prediction using a Multi-Bacterial Network](https://doi.org/10.1093/bioinformatics/btaa885), _Bioinformatics (2020). 
+Jeffrey N. Law, Shiv D. Kale, and T. M. Murali. [Accurate and Efficient Gene Function Prediction using a Multi-Bacterial Network](https://doi.org/10.1093/bioinformatics/btaa885), _Bioinformatics_ (2020). 
