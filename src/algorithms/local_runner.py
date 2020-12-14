@@ -36,17 +36,16 @@ def setupOutputs(run_obj, **kwargs):
 
 def run(run_obj):
     """
-    Function to run Local and LocalPlus
-    *goids_to_run*: goids for which to run the method. 
-        Must be a subset of the goids present in the ann_obj
+    Function to run Local and LocalPlus where the score of each node 
+        is the weighted average of the labels its neighbors 
     """
     params_results = run_obj.params_results
     P, alg = run_obj.P, run_obj.name
 
     #if 'solver' in params:
-    # make sure the goid_scores matrix is reset
+    # make sure the term_scores matrix is reset
     # because if it isn't empty, overwriting the stored scores seems to be time consuming
-    goid_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
+    term_scores = sp.lil_matrix(run_obj.ann_matrix.shape, dtype=np.float)
     # Local doesn't have any parameters, so no need to print this
     #print("Running %s with these parameters: %s" % (alg, params))
 
@@ -56,7 +55,7 @@ def run(run_obj):
         ann_mat = (ann_mat > 0).astype(int)
 
     # Run Local on all terms
-    goid_scores, process_time, wall_time = runLocal(
+    term_scores, process_time, wall_time = runLocal(
         P, ann_mat)
 
     if run_obj.kwargs.get('verbose', False) is True:
@@ -65,7 +64,7 @@ def run(run_obj):
     params_results["%s_wall_time"%alg_name] += wall_time
     params_results["%s_process_time"%alg_name] += process_time
 
-    run_obj.goid_scores = goid_scores
+    run_obj.term_scores = term_scores
     run_obj.params_results = params_results
     return
 
@@ -80,11 +79,11 @@ def runLocal(P, ann_mat):
     """
     start_wall_time = time.time()
     start_process_time = time.process_time()
-    goid_scores = P.dot(ann_mat.T).T
+    term_scores = P.dot(ann_mat.T).T
     wall_time = time.time() - start_wall_time
     process_time = time.process_time() - start_process_time
 
-    return goid_scores, process_time, wall_time
+    return term_scores, process_time, wall_time
 
 
 def str_(s):
