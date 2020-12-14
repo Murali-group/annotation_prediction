@@ -151,12 +151,12 @@ def get_selected_species(species_to_uniprot_idx, target_taxons_file=None, taxons
             for line in f:
                 if line[0] == "#":
                     continue
-            line = line.rstrip().split('\t')
-            taxon = line[0]
-            species_name = '-'
-            if len(line) > 1:
-                species_name = line[1]
-            selected_species[taxon] = species_name
+                line = line.rstrip().split('\t')
+                taxon = line[0]
+                species_name = '-'
+                if len(line) > 1:
+                    species_name = line[1]
+                selected_species[taxon] = species_name
     # if not taxon IDs were specified, then use the either the target_taxons_file, or all of the taxon  
     if taxons is None:
         taxons = selected_species.keys()
