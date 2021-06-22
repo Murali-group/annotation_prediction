@@ -22,7 +22,7 @@ def runGeneMANIA(L, y, alpha=1, tol=1e-05, Milu=None, verbose=False):
     """
     *L*: Laplacian of the original network
     *y*: vector of positive and negative assignments. 
-         If y does not contain negatives, will be run as GeneManiaPlus. 
+         If y does not contain negatives, will be run as GeneManiaPlus, also known as Regularized Laplacian (RL). 
     *alpha*: parameter between 0 and 1 to control the influence of neighbors in the network.
         0 would ignore the network completely, and nodes would get their original score.
     *tol*: Conjugate Gradient tolerance for convergance
