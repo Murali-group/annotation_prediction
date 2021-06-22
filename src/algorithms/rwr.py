@@ -51,8 +51,10 @@ def RWR(P, y, max_iters=1000, eps=0.0001, a=0.95, verbose=False):
 
 def LazyRW(P, y, a=0.95, tol=1e-05, verbose=False):
     """
-    *y*: vector of positive and negative assignments. 
-         If y does not contain negatives, will be run as GeneManiaPlus, also known as Regularized Laplacian (RL). 
+    Lazy Random Walk implementation
+
+    *P*: Network as a scipy sparse matrix. Should already be normalized
+    *y*: vector with 1's at each node from which to start the random walk
     *alpha*: parameter between 0 and 1 to control the influence of neighbors in the network.
         0 would ignore the network completely, and nodes would get their original score.
     *tol*: Conjugate Gradient tolerance for convergance
