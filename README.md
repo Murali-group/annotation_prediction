@@ -17,6 +17,9 @@ To install the R packages:
 R -e "install.packages('https://cran.r-project.org/src/contrib/PRROC_1.3.1.tar.gz', type = 'source')"
 ```
 
+> If you are unable to install the the R package for computing the AUPRC and AUROC, 
+> the code will use sklearn instead, which is not as accurate in some cases.
+
 ## Usage 
 ### Generate predictions
 The script will automatically generate predictions from each of the given methods with `should_run: [True]` in the config file. The default number of predictions stored is 10. To write more, use either the `--num-pred-to-write` or `--factor-pred-to-write options` (see python run_eval_algs.py --help). For example:
