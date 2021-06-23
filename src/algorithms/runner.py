@@ -7,7 +7,7 @@ from scipy import sparse as sp
 # my local imports
 from . import fastsinksource_runner as fastsinksource
 from . import sinksource_bounds_runner as ss_bounds
-from . import genemania_runner as genemania
+from . import rl_genemania_runner as genemania
 from . import rwr_runner as rwr
 from . import logistic_regression_runner as logistic_regression
 from . import deepnf_runner as deepnf

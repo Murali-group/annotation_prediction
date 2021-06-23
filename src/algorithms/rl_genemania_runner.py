@@ -106,7 +106,7 @@ def run(run_obj):
         # limit the scores to the target nodes
         if len(run_obj.target_prots) != len(scores):
             mask = np.ones(len(scores), np.bool)
-            mask[run_obj.target_prots] = 0
+            mask[run_obj.target_prots] = False
             # everything that's not a target prot will be set to 0
             scores[mask] = 0
         # 0s are not explicitly stored in lil matrix
