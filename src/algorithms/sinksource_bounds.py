@@ -7,7 +7,7 @@ import sys
 import time
 import numpy as np
 from scipy.sparse import csr_matrix
-#from scipy.stats import kendalltau  #, spearmanr, weightedtau
+from scipy.stats import kendalltau
 from . import alg_utils
 #import src.evaluate.eval_utils as eval_utils
 
