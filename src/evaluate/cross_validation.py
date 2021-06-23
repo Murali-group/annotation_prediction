@@ -1,9 +1,9 @@
-# needed for cross-validation
 import os
 from tqdm import tqdm, trange
 import numpy as np
 from scipy import sparse
 try:
+    # needed for cross-validation
     from sklearn.model_selection import KFold
 except ImportError:
     pass
@@ -89,10 +89,12 @@ def run_cv_all_terms(
             # because each fold contains a different set of positives/negatives, and combined they contain all positives/negatives,
             # store all of the prediction scores from each fold in a matrix
             combined_fold_scores = sparse.lil_matrix(ann_matrix.shape, dtype=np.float)
+            # also keep track of the fold each node belongs to
+            node_folds = {}
             for curr_fold, (train_ann_mat, test_ann_mat) in enumerate(ann_matrix_folds):
                 print("*  "*20)
                 print("Fold %d" % (curr_fold+1))
-    
+
                 # change the annotation matrix to the current fold
                 curr_ann_obj = setup.Sparse_Annotations(train_ann_mat, terms, prots)
                 # replace the ann_obj in the runner with the current fold's annotations  
@@ -117,6 +119,7 @@ def run_cv_all_terms(
                     curr_comb_scores[test_pos] = curr_term_scores[test_pos]
                     curr_comb_scores[test_neg] = curr_term_scores[test_neg]
                     combined_fold_scores[i] = curr_comb_scores 
+                    node_folds.update({n: curr_fold for n in list(test_pos) + list(test_neg)})
 
             # replace the term_scores in the runner to combined_fold_scores to evaluate
             run_obj.term_scores = combined_fold_scores 
@@ -129,7 +132,7 @@ def run_cv_all_terms(
                 run_obj, ann_obj, out_file,
                 #non_pos_as_neg_eval=opts.non_pos_as_neg_eval,
                 alg=run_obj.name, rep=rep if num_reps > 1 else None,
-                append=True, **kwargs)
+                append=True, node_folds=node_folds, **kwargs)
 
     print("Finished running cross-validation")
     return
@@ -137,7 +140,7 @@ def run_cv_all_terms(
 
 def get_output_prefix(
         folds, rep, sample_neg_examples_factor=None,
-        curr_seed=None):
+        curr_seed=None, comb_type='max', **kwargs):
     """
     Get the prefix of the output cross-validation results file
     *folds*: number of cross-validation folds
@@ -166,7 +169,7 @@ def split_cv_all_terms(ann_obj, folds=5, seed=None, **kwargs):
     terms, prots = ann_obj.terms, ann_obj.prots
     print("Splitting all annotations into %d folds by splitting each terms annotations into folds, and then combining them" % (folds))
     # TODO there must be a better way to do this than getting the folds in each term separately
-    # but thi at least ensures that each term has evenly split annotations
+    # but this at least ensures that each term has evenly split annotations
     # list of tuples containing the (train pos, train neg, test pos, test neg) 
     ann_matrix_folds = []
     for i in range(folds):
