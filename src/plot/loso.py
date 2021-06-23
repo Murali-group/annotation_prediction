@@ -1,4 +1,4 @@
-# For each target species, plot the fmax distributions and # annotations from 
+# For each target species, plot the fmax boxplot distributions and # annotations being evaluated.
 
 from collections import defaultdict
 import itertools
@@ -220,8 +220,14 @@ def generate_plots(df, taxon_num_ann, goid_num_ann,
         out_file = "%s/stats/loso-%s-%s-%s%s.pdf" % (
                 out_pref, measure, kwargs['alg1'], kwargs['alg2'], kwargs.get('plot_postfix',''))
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
-        scatterplot_fmax(df, goid_num_ann, measure=measure, 
-                out_file=out_file, **kwargs)
+        if kwargs.get('compare_taxon_median'):
+            out_file = out_file.replace('.pdf','-taxon-median.pdf')
+            # summarize the fmax values by the median per species
+            scatterplot_taxon_fmax(df, measure=measure, 
+                    out_file=out_file, **kwargs)
+        else:
+            scatterplot_fmax(df, goid_num_ann, measure=measure, 
+                    out_file=out_file, **kwargs)
 
 
 def eval_stat_sig(
@@ -235,12 +241,18 @@ def eval_stat_sig(
     # Don't think sorting is needed
     #df_curr.sort_values('goid', inplace=True) 
     for a1, a2 in combinations:
-        a1_fmax = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a1, a1)][measure]
-        a2_fmax = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a2, a2)][measure]
+        df1 = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a1, a1)]
+        df2 = df_curr[df_curr['Algorithm'] == kwargs['alg_names'].get(a2, a2)]
+        # make sure they line up
+        df1 = df1.loc[df1.index.isin(df2.index)]
+        df2 = df2.loc[df2.index.isin(df1.index)]
+        a1_fmax = df1[measure]
+        a2_fmax = df2[measure]
         #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
         test_statistic, pval = wilcoxon(a1_fmax, a2_fmax, alternative='greater') 
         out_str += "%s\t%s\t%0.3e\t%0.3e\n" % (a1, a2, pval, pval*len(combinations))
 
+    print(out_str)
     # also compare individual species
     curr_species = df_curr['#taxon'].unique()
     # limit the species for which we run the test to those that have at least 5 terms
@@ -254,8 +266,13 @@ def eval_stat_sig(
         #name = f_settings.NAME_TO_SHORTNAME2.get(selected_species[str(s)],'-')
         name = kwargs['sp_names'].get(str(s),'-') if 'sp_names' in kwargs else '-'
         df_s = df_curr[df_curr['#taxon'] == s]
-        a1_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg1, alg1)][measure]
-        a2_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg2, alg2)][measure]
+        df1 = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(a1, a1)]
+        df2 = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(a2, a2)]
+        # make sure they line up
+        df1 = df1.loc[df1.index.isin(df2.index)]
+        df2 = df2.loc[df2.index.isin(df1.index)]
+        a1_fmax = df1[measure]
+        a2_fmax = df2[measure]
         if s in species_with_terms:
         #try:
             #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
@@ -339,7 +356,7 @@ def plot_fmax_eval(
         sns.boxplot(x=y,y=x, order=sort_by_med_fmax[::-1], 
                 hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 
                 data=df_curr, orient='v', fliersize=1.5,
-                palette=curr_palette, saturation=0.85)
+                palette=curr_palette, saturation=0.9)
     else:
         sns.swarmplot(x=x,y=y, order=sort_by_med_fmax, dodge=True,
                     hue='Algorithm', hue_order=[plot_utils.ALG_NAMES.get(a,a) for a in algs], 

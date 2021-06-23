@@ -21,6 +21,12 @@ import pandas as pd
 import seaborn as sns
 # make this the default for now
 sns.set_style('darkgrid')
+sns.set_context('paper')
+# Extra settings for the matplotlib text to be editable in inkscape
+new_rc_params = {'text.usetex': False,
+"svg.fonttype": 'none'
+}
+matplotlib.rcParams.update(new_rc_params)
 
 # my local imports
 from ..algorithms import runner as runner
@@ -30,17 +36,21 @@ from ..evaluate import cross_validation as cv
 
 
 ALG_NAMES = {
-    'localplus': 'Local+', 'local': 'Local',
-    'sinksource': 'SS', 'sinksourceplus': 'SS+',
+    #'localplus': 'Local+', 'local': 'Local',
+    'localplus': 'Local', 'local': 'Local-',
+    'sinksource': 'SS-', 'sinksourceplus': 'SS',
     'sinksource_bounds': 'SinkSource_Bounds',
     'fastsinksource': 'FSS', 'fastsinksourceplus': 'FSS+',
-    'genemania': 'GM', 'genemaniaplus': 'GM+',
+    'genemania': 'GM', 'genemaniaplus': 'RL',
     'logistic_regression': 'LogReg',
-    'svm': 'SVM',
+    'svm': 'SVM', 'deepnf': 'deepNF',
     }
 
 measure_map = {'fmax': r'F$_{\mathrm{max}}$'}
-param_map = {'alpha': r'$\rm \alpha$'}
+param_map = {
+    'alpha': r'$\rm \alpha$',
+    'lambda': r'$\rm \lambda$',
+}
 #param_map = {'alpha': r'$\mathbf{\mathrm{\alpha}}$'}
 
 # tried to be fancy :P
@@ -82,10 +92,8 @@ def setup_opts():
                      help="Algorithms to plot. Must be in the config file. If specified, will ignore 'should_run' in the config file")
     group.add_argument('--out-pref', '-o', type=str, default="",
                      help="Output prefix for writing plot to file. Default: outputs/viz/<net_version>/<exp_name>/")
-    group.add_argument('--goterm', '-G', type=str, action="append",
+    group.add_argument('--term', '-T', type=str, action="append",
                      help="Specify the GO terms to use (should be in GO:00XX format)")
-    #group.add_argument('--exp-type', type=str, default='cv-5folds',
-    #                 help='Type of experiment (e.g., cv-5fold, loso, temporal-holdout). Default: cv-5folds')
     group.add_argument('--only-terms-file', type=str, 
                      help="File containing a list of terms (in the first col, tab-delimited) for which to limit the results")
     group.add_argument('--only-terms-name', type=str, default='',
@@ -98,7 +106,7 @@ def setup_opts():
     group = parser.add_argument_group("Evaluation options")
     group.add_argument('--cross-validation-folds', '-C', type=int,
                      help="Get results from cross validation using the specified # folds")
-    group.add_argument('--num-reps', type=int, default=1,
+    group.add_argument('--num-reps', type=int, 
                      help="If --exp-type is <cv-Xfold>, this number of times CV was repeated. Default=1")
     group.add_argument('--cv-seed', type=int,
                      help="Seed used when running CV")
@@ -108,6 +116,8 @@ def setup_opts():
                      help="Get results from leave-one-species-out validation")
     group.add_argument('--ratio-over-random', action='store_true',
                      help="Plot the ratio over a random predictor (# P / (# P + # N)) for each measure.")
+    #group.add_argument('--exp-type', type=str, default='cv-5folds',
+    #                 help='Type of experiment (e.g., cv-5fold, loso, temporal-holdout). Default: cv-5folds')
 
     # plotting parameters
     group = parser.add_argument_group('Plotting Options')
@@ -126,6 +136,8 @@ def setup_opts():
                      help="Make a precision recall curve for each specified term")
 
     group = parser.add_argument_group('Parameter / Statisical Significance Options')
+    group.add_argument('--compare-algs', action="store_true",
+                       help="compute statistical significance of differences")
     group.add_argument('--compare-param', type=str,
                        help="name of parameter to compare (e.g., alpha)")
     group.add_argument('--max-val', type=str,
@@ -137,14 +149,18 @@ def setup_opts():
     # figure parameters
     group = parser.add_argument_group('Figure Options')
     # Moved to the config file
-    group.add_argument('--title','-T', 
+    group.add_argument('--title',
                      help="Title to give the figure. Default is the exp_name ")
     group.add_argument('--for-paper', action='store_true', default=False,
                      help="Exclude extra information from the title and make the labels big and bold")
     group.add_argument('--horiz','-H', dest="horizontal", action='store_true', default=False,
                      help="Flip the plot so the measure is on the y-axis (horizontal). Default is x-axis (vertical)")
+    group.add_argument('--hue', 
+                     help="DataFrame column to use for the hue.")
     group.add_argument('--ylim', type=float, nargs=2,
                      help="Set the y axis min and max to these two values")
+    group.add_argument('--svg', action='store_true', default=False,
+                     help="Write an svg in addition to a pdf")
     group.add_argument('--png', action='store_true', default=False,
                      help="Write a png in addition to a pdf")
     group.add_argument('--term-stats', type=str, action='append',
@@ -199,7 +215,7 @@ def main(config_map, ax=None, out_pref='', **kwargs):
     # plot prec-rec separately from everything else
     if kwargs['prec_rec']:
         # loop through all specified terms, or use an empty string if no terms were specified
-        terms = kwargs['goterm'] if kwargs['goterm'] is not None else ['']
+        terms = kwargs['term'] if kwargs['term'] is not None else ['']
         for term in terms:
             term = '-'+term if term != '' else ''
             prec_rec = 'prec-rec' + term
@@ -209,17 +225,25 @@ def main(config_map, ax=None, out_pref='', **kwargs):
                 print("no results found. Quitting")
                 sys.exit()
             # limit to the specified terms
-            if kwargs['only_terms'] is not None:
+            if kwargs.get('only_terms') is not None:
                 df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
 
-            title = '-'.join(df_all['plot_exp_name'].unique())
-            plot_curves(df_all, title=title, **kwargs)
+            kwargs['title'] = '-'.join(df_all['plot_exp_name'].unique())
+            plot_curves(df_all, **kwargs)
     else:
         # get the path to the specified files for each alg
         df_all = load_all_results(input_settings, alg_settings, output_settings, **kwargs)
         if len(df_all) == 0:
             print("no terms found. Quitting")
             sys.exit()
+        # if specified, use the ratio over a random predictor 
+        if kwargs.get('ratio_over_random') and len(df_all) > 0:
+            df_all = get_ratios_over_random(df_all, **kwargs)
+            # and rename the columns to include 'ratio'
+            measure_ratio_map = {m: m+'-ratio' for m in kwargs['measures']}
+            kwargs['measures'] = [m+'-ratio' for m in kwargs['measures']]
+            df_all.rename(columns=measure_ratio_map, inplace=True)
+
         # limit to the specified terms
         if kwargs.get('only_terms') is not None:
             df_all = df_all[df_all['#term'].isin(kwargs['only_terms'])]
@@ -230,17 +254,9 @@ def main(config_map, ax=None, out_pref='', **kwargs):
             #num_terms = df_all.groupby(['#taxon', '#term']).size()
         algs = df_all['Algorithm'].unique()
 
-        # if specified, use the ratio over a random predictor 
-        if kwargs.get('ratio_over_random'):
-            df_all = get_ratios_over_random(df_all, **kwargs)
-            # and rename the columns to include 'ratio'
-            measure_ratio_map = {m: m+'-ratio' for m in kwargs['measures']}
-            kwargs['measures'] = [m+'-ratio' for m in kwargs['measures']]
-            df_all.rename(columns=measure_ratio_map, inplace=True)
-
         print("\t%d algorithms, %d plot_exp_name values\n" % (len(algs), len(df_all['plot_exp_name'].unique())))
         #print(df_all.head())
-        results_overview(df_all, measures=kwargs['measures'])
+        results_overview(df_all, measures=kwargs['measures'], verbose=kwargs.get('verbose'), algs=algs)
 
         title = setup_title(df_all, num_terms, **kwargs)
         kwargs['title'] = title
@@ -252,20 +268,23 @@ def main(config_map, ax=None, out_pref='', **kwargs):
 
 
         # now attempt to figure out what labels/titles to put in the plot based on the net version, exp_name, and plot_exp_name
+        measure_axes = {}
         for measure in kwargs['measures']:
             # also check the statistical significance options
             if kwargs['compare_param'] and kwargs['max_val']:
                 compute_param_stat_sig(df_all, measure=measure, **kwargs)
+            if kwargs.get('compare_algs'):
+                compute_alg_stat_sig(df_all, measure=measure, **kwargs)
             if kwargs['scatter']:
-                ax = plot_scatter(df_all, measure=measure, ax=ax, **kwargs) 
+                measure_axes[measure] = plot_scatter(df_all, measure=measure, ax=ax, **kwargs) 
             if kwargs['line']:
-                ax = plot_line(df_all, measure=measure, ax=ax, **kwargs)
+                measure_axes[measure] = plot_line(df_all, measure=measure, ax=ax, **kwargs)
             if kwargs['boxplot']:
-                if df_all['plot_exp_name'].nunique() > 1:
-                    ax = plot_multi_boxplot(df_all, measure=measure, ax=ax, **kwargs)
+                if df_all['plot_exp_name'].nunique() > 1 and kwargs.get('hue') is None:
+                    measure_axes[measure] = plot_multi_boxplot(df_all, measure=measure, ax=ax, **kwargs)
                 else:
-                    ax = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
-    return ax
+                    measure_axes[measure] = plot_boxplot(df_all, measure=measure, ax=ax, **kwargs)
+    return measure_axes
 
 
 def get_ratios_over_random(df_all, sample_neg_examples_factor=None, **kwargs):
@@ -314,13 +333,8 @@ def setup_variables(config_map, out_pref='', **kwargs):
     """
     Function to setup the various args specified in kwargs
     """
-    input_settings = config_map['input_settings']
-    #input_dir = input_settings['input_dir']
-    alg_settings = config_map['algs']
-    output_settings = config_map['output_settings']
-    # update the settings specified in this script with those set in the yaml file
-    if config_map.get('eval_settings'):
-        kwargs.update(config_map['eval_settings'])
+    input_settings, input_dir, output_dir, alg_settings, kwargs \
+        = config_utils.setup_config_variables(config_map, **kwargs)
     if config_map.get('plot_settings'):
         #config_map['plot_settings'].update(kwargs)
         kwargs.update(config_map['plot_settings'])
@@ -343,7 +357,7 @@ def setup_variables(config_map, out_pref='', **kwargs):
 
     if out_pref == "":
         out_pref = "%s/viz/%s/%s/" % (
-                output_settings['output_dir'], 
+                output_dir, 
                 input_settings['datasets'][0]['net_version'], 
                 input_settings['datasets'][0]['exp_name'])
     if kwargs.get('only_terms_file') is not None:
@@ -360,12 +374,14 @@ def setup_variables(config_map, out_pref='', **kwargs):
         out_pref += kwargs.get('postfix','')
         os.makedirs(os.path.dirname(out_pref), exist_ok=True)
 
-    return input_settings, alg_settings, output_settings, out_pref, kwargs
+    return input_settings, alg_settings, config_map['output_settings'], out_pref, kwargs
 
 
 def savefig(out_file, **kwargs):
     print("Writing %s" % (out_file))
     plt.savefig(out_file, bbox_inches='tight')
+    if kwargs.get('svg'):
+        plt.savefig(out_file.replace('.pdf','.svg'), bbox_inches='tight')
     if kwargs.get('png'):
         plt.savefig(out_file.replace('.pdf','.png'), bbox_inches='tight')
     plt.close()
@@ -427,8 +443,10 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
             palette=curr_palette)
 
     plt.setp(ax.lines,linewidth=1)  # set lw for all lines of g axes
-    if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[-1]) > 10:
-        ax.tick_params(axis='x', rotation=45)
+    if kwargs['horizontal'] and len(df['plot_exp_name'].unique()[0]) > 10:
+        xlabels = ax.get_xticklabels()
+        ax.set_xticklabels(xlabels, rotation=45, ha='right')
+        #ax.tick_params(axis='x', rotation=45, horizontalalignment='right')
         ax.tick_params(axis='y', labelsize='large')
 
     # TODO add an option for this
@@ -445,6 +463,9 @@ def plot_line(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
         x1, x2 = ax.get_xlim()
         ax.set_xlim(int(x1)-0.5, int(x2)+0.5)
 
+    if kwargs.get('ylim'):
+        y1, y2 = kwargs['ylim']
+        ax.set_ylim(y1, y2)
     ## change the fmax axis to be between 0 and 1
 #    if kwargs.get('for_paper'):
 #        # TODO add an option for this:
@@ -549,19 +570,33 @@ def plot_multi_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, *
             #'axes.edgecolor': '.3',
             'axes.spines.bottom': True, 'axes.spines.left': True,
             'axes.spines.right': True, 'axes.spines.top': True,})
+    #df['Algorithm'] = df['Algorithm'].astype(str)
     df['Algorithm'] = df['Algorithm'].astype(str)
     df = df[['Algorithm', measure, 'plot_exp_name']]
-    g = sns.catplot(x=measure, y='Algorithm', data=df,  # hue='Algorithm',
+    x = "Algorithm"
+    y = measure
+    orient = 'v'
+    if kwargs.get('horizontal'):
+        y = "Algorithm"
+        x = measure
+        orient = 'h'
+    g = sns.catplot(x=x, y=y, data=df,  # hue='Algorithm',
                     col='plot_exp_name', col_wrap=5, #row='plot_exp_name',  
-                    height=2, aspect=4, palette=curr_palette, 
-                    #orient='v' if not kwargs.get('horizontal') else 'h',
+                    height=4, aspect=1, palette=curr_palette, 
+                    orient=orient,
                     fliersize=1,  
                     kind='box',)
                     #kind="violin", cut=0, inner='quartile',)
+    # Fix the ax subtitle
+    for ax in g.fig.axes:
+        ax.set_title(ax.get_title().replace('plot_exp_name = ',''))
+        ax.set_xticks(list(range(len(algs))))
+        ax.set_xticklabels(algs)
     # put less space between the plots
     g.fig.subplots_adjust(hspace=.05)
-    g.set(xticks=np.arange(0,11)*0.1)
     if kwargs['for_paper'] is True:
+        # if the x-axis is the measure, then put it between 0 and 1
+        g.set(xticks=np.arange(0,11)*0.1)
         g.set_ylabels("")
         g.set_titles("")
         g.fig.tight_layout()
@@ -573,14 +608,7 @@ def plot_multi_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, *
         savefig(out_file, **kwargs)
 
 
-def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwargs):
-    df['Algorithm'] = df['Algorithm'].astype(str)
-    df = df[['Algorithm', measure]]
-    #print(df.head())
-    df.reset_index(inplace=True)
-    df = df.pivot(columns='Algorithm', values=measure)
-    #print(df.head())
-    #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
+def get_alg_order(**kwargs):
     if kwargs.get('compare_param'):
         # we're not ordering the algorithms, but the parameters
         # and the param is in the 'algs' column
@@ -589,12 +617,30 @@ def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
             order += [str(p) for p in kwargs['alg_params'][alg][kwargs['compare_param']]]
     else:
         order = [kwargs['alg_names'][a] for a in kwargs['algs']]
-    print("horizontal: %s" % (kwargs.get('horizontal')))
-    print("orient: %s" % ('v' if not kwargs.get('horizontal') else 'h'))
+    return order
 
-    ax = sns.boxplot(data=df, ax=ax,
+
+def plot_boxplot(df, measure='fmax', out_pref="test", title="", ax=None, hue=None, **kwargs):
+    df['Algorithm'] = df['Algorithm'].astype(str)
+    #df = df[['Algorithm', measure]]
+    x,y = 'Algorithm', measure
+    x,y = (y,x) if kwargs.get('horizontal') else (x,y)
+    #print(df.columns)
+    df = df[[x,y, 'plot_exp_name']]
+    #print(df.head())
+    df.reset_index(inplace=True)
+    #df = df.pivot(columns='Algorithm', values=measure)
+    #print(df.head())
+    #ax = sns.boxplot(x=measure, y='Algorithm', data=df, ax=ax,
+    order = get_alg_order(**kwargs)
+    print("horizontal: %s" % (kwargs.get('horizontal')))
+    #print("orient: %s" % ('v' if not kwargs.get('horizontal') else 'h'))
+
+    print(df.head())
+    print("x=%s, y=%s, hue=%s, order=%s" % (x, y, hue, order))
+    ax = sns.boxplot(x=x, y=y, data=df, ax=ax, hue=hue,
                      fliersize=1.5, order=order,
-                     orient='v' if not kwargs.get('horizontal') else 'h',
+                     #orient='v' if not kwargs.get('horizontal') else 'h',
                      palette=my_palette if 'palette' not in kwargs else kwargs['palette'],
                 )
 
@@ -625,13 +671,14 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
     # make a prec-rec plot per term
     for term in sorted(df["#term"].unique()):
         curr_df = df[df['#term'] == term]
+        plot_df = curr_df.copy()
         # get only the positive examples to plot prec_rec
-        curr_df = curr_df[curr_df['pos/neg'] == 1]
+        #curr_df = curr_df[curr_df['pos/neg'] == 1]
         # also put the fmax on the plot, and add it to the label
         new_alg_names = []
         fmax_points = {}
         for alg in curr_df['Algorithm'].unique():
-            df_alg = curr_df[curr_df['Algorithm'] == alg]
+            df_alg = plot_df[plot_df['Algorithm'] == alg]
             #print(df_alg['prec'], df_alg['rec'])
             fmax, idx = eval_utils.compute_fmax(df_alg['prec'].values, df_alg['rec'].values, fmax_idx=True)
             new_alg_name = "%s (%0.3f)" % (alg, fmax)
@@ -639,11 +686,12 @@ def plot_curves(df, out_pref="test", title="", ax=None, **kwargs):
             fmax_points[alg] = (df_alg['prec'].values[idx], df_alg['rec'].values[idx])
 
         fig, ax = plt.subplots()
-        # TODO show the standard deviation from the repititions
-        sns.lineplot(x='rec', y='prec', hue='Algorithm', data=curr_df,
-                ci=None, ax=ax, legend=False,
+        sns.lineplot(x='rec', y='prec', hue='Algorithm', data=plot_df,
+                    #ci=kwargs.get('ci',95), ax=ax, legend=False,
+                    # use this to show the individual replicates
+                    units='repetition', estimator=None, lw=0.3, alpha=0.1,
+                    ax=ax, legend=False,
                 )
-                #xlim=(0,1), ylim=(0,1), ci=None)
 
         ax.set_xlim(-0.02,1.02)
         ax.set_ylim(-0.02,1.02)
@@ -750,13 +798,74 @@ def plot_scatter(df, measure='fmax', out_pref="test", title="", ax=None, **kwarg
         savefig(out_file, **kwargs)
 
 
+def compute_alg_stat_sig(df, measure='fmax', **kwargs):
+    """
+    Compute the statistical significance (using wilcoxon) of the differences between methods
+    """
+    out_str = ""
+    algs = df['Algorithm'].unique()
+    combinations = list(itertools.combinations(algs, 2))
+    out_str += "#alg1\talg2\talg1-med\talg2-med\tpval\tCorrected p-value (x%d)\n" % (len(combinations))
+    # Don't think sorting is needed
+    #df_curr.sort_values('goid', inplace=True) 
+    for a1, a2 in combinations:
+        #a1_vals = df[df['Algorithm'] == kwargs['alg_names'].get(a1, a1)][measure]
+        #a2_vals = df[df['Algorithm'] == kwargs['alg_names'].get(a2, a2)][measure]
+        a1_vals = df[df['Algorithm'] == a1][measure]
+        a2_vals = df[df['Algorithm'] == a2][measure]
+        #test_statistic, pval = mannwhitneyu(a1_vals, a2_vals, alternative='greater') 
+        if np.median(a1_vals) > np.median(a2_vals):
+            test_statistic, pval = wilcoxon(a1_vals, a2_vals, alternative='greater') 
+        else:
+            test_statistic, pval = wilcoxon(a1_vals, a2_vals, alternative='less') 
+        out_str += "%s\t%s\t%0.3f\t%0.3f\t%0.3e\t%0.3e\n" % (
+            a1, a2, np.median(a1_vals), np.median(a2_vals), pval, pval*len(combinations))
+
+    # # also compare individual species
+    # curr_species = df['#taxon'].unique()
+    # # limit the species for which we run the test to those that have at least 5 terms
+    # species_with_terms = set([s for s, df_s in df.groupby('#taxon') \
+    #                           if df_s['#goid'].nunique() >= sp_term_cutoff])
+    # print("%d species with at least %d terms" % (len(species_with_terms), sp_term_cutoff))
+    # if sort_taxon_by_fmax is not None:
+    #     curr_species = sort_taxon_by_fmax
+    # out_str += "Species\tAlg1\tAlg2\tAlg1-med\tAlg2-med\tRaw p-value\tCorrected p-value (x%d)\n" % (len(species_with_terms))
+    # for s in curr_species:
+    #     #name = f_settings.NAME_TO_SHORTNAME2.get(selected_species[str(s)],'-')
+    #     name = kwargs['sp_names'].get(str(s),'-') if 'sp_names' in kwargs else '-'
+    #     df_s = df[df['#taxon'] == s]
+    #     a1_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg1, alg1)][measure]
+    #     a2_fmax = df_s[df_s['Algorithm'] == kwargs['alg_names'].get(alg2, alg2)][measure]
+    #     if s in species_with_terms:
+    #     #try:
+    #         #test_statistic, pval = mannwhitneyu(a1_fmax, a2_fmax, alternative='greater') 
+    #         # TODO requires an updated version of scipy
+    #         test_statistic, pval = wilcoxon(a1_fmax, a2_fmax, alternative='greater') 
+    #         line = "%s\t%s\t%s\t%0.3f\t%0.3f\t%0.2e\t%0.2e" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median(), pval, pval*len(species_with_terms))
+    #         sp_pval[s] = pval
+    #     # this only really happens when there is only 1 or two terms with the same fmax
+    #     #except ValueError:
+    #     else:
+    #         line = "%s\t%s\t%s\t%0.3f\t%0.3f\t-\t-" % (name, alg1, alg2, a1_fmax.median(), a2_fmax.median())
+    #         pval = 1
+    #     out_str += line+'\n'
+
+    # if kwargs.get('forceplot') or not os.path.isfile(out_file):
+    #     print("writing to %s" % (out_file))
+    #     with open(out_file, 'w') as f:
+    #         f.write(out_str)
+    # else:
+    #     print("Would've written to %s. Use --forceplot to overwrite" % (out_file))
+    print(out_str)
+
+
 def compute_param_stat_sig(df, measure='fmax', **kwargs):
     compare_param, max_val = kwargs['compare_param'], str(kwargs['max_val'])
     # 'Algorithm' is actually holding the parameter value
     param_col = 'Algorithm'
     alg_params = kwargs['alg_params']
     out_file = "%s%s-pvals.tsv" % (kwargs['out_pref'], measure)
-    out_str = "#alg\t%s\t%s-2\t2-median fmax\tpval\tmedian of differences\n" % (compare_param, compare_param)
+    out_str = "#alg\t%s\t%s-2\t2-median %s\tpval\tmedian of differences\n" % (compare_param, compare_param, measure)
     if kwargs['forceplot'] or not os.path.isfile(out_file):
         params_list = []
         params_alg = {}
@@ -816,23 +925,33 @@ def compute_param_stat_sig(df, measure='fmax', **kwargs):
 #        print("%s already exists. Skipping" % (stat_file))
 
 
-def results_overview(df, measures=['fmax']):
+def results_overview(df, measures=['fmax'], algs=None, verbose=False):
     """
     Print an overview of the number of values / terms, as well as the median fmax
     """
-    print("plot_exp_name\tmeasure\talg\tmedian\t# terms")
+    if verbose:
+        print("plot_exp_name\tmeasure\talg\tmin\t25%\tmedian\t75%\tmax\t# terms")
+    else:
+        print("plot_exp_name\tmeasure\talg\tmedian\t# terms")
     #print("net_version\texp_name\tmeasure\talg\tmedian\t# terms")
     #for plot_exp_name in sorted(df['plot_exp_name'].unique()):
     for plot_exp_name in df['plot_exp_name'].unique():
         df_curr = df[df['plot_exp_name'] == plot_exp_name]
+        if algs is None:
+            algs = sorted(df_curr['Algorithm'].unique())
         #net_version, exp_name = df_curr['net_version'].unique()[0], df_curr['exp_name'].unique()[0]
         #if len(plot_exp_name) > len(net_version + exp_name):
-        # limit the goterms to those that are also present for SinkSource(?)
+        # limit the terms to those that are also present for SinkSource(?)
         for measure in measures:
-            for alg in sorted(df_curr['Algorithm'].unique()):
+            for alg in algs:
                 df_alg = df_curr[df_curr['Algorithm'] == alg][measure]
-                print("%s\t%s\t%s\t%0.3f\t%d" % (
-                    plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
+                if verbose:
+                    print("%s\t%s\t%s\t%0.3f\t%0.3f\t%0.3f\t%0.3f\t%0.3f\t%d" % (
+                        plot_exp_name, measure, alg,
+                        df_alg.min(), df_alg.quantile(.25), df_alg.median(), df_alg.quantile(.75), df_alg.max(), len(df_alg)))
+                else:
+                    print("%s\t%s\t%s\t%0.3f\t%d" % (
+                        plot_exp_name, measure, alg, df_alg.median(), len(df_alg)))
                 #print("%s\t%s\t%s\t%s\t%0.3f\t%d" % (net_version, exp_name, measure, alg, df_alg.median(), len(df_alg)))
 
 
@@ -841,7 +960,7 @@ def get_algs_to_run(alg_settings, **kwargs):
     global print_warning
     # if there aren't any algs specified by the command line (i.e., kwargs),
     # then use whatever is in the config file
-    if kwargs['algs'] is None:
+    if kwargs.get('algs') is None:
         algs_to_run = config_utils.get_algs_to_run(alg_settings)
         kwargs['algs'] = [a.lower() for a in algs_to_run]
         if print_warning:
@@ -885,6 +1004,7 @@ def load_all_results(input_settings, alg_settings, output_settings, prec_rec_str
                 )
                 add_dataset_settings(dataset, df) 
                 df_all = pd.concat([df_all, df])
+
     return df_all
 
 
@@ -893,43 +1013,41 @@ def read_cv_results(dataset, alg, alg_params, results_dir, **kwargs):
     Small helper function to load the results specifically for cross-validation
     """
     folds = kwargs.get('cross_validation_folds')
-    cv_seed = kwargs.get('cv_seed')
-    neg_factor = kwargs.get('sample_neg_examples_factor')
     # for 100+ reps, loading each individual file is taking a while, so store them in a secondary file
-    if kwargs.get('num_reps',1) > 1:
-        #rep_file = get_rep_file(
-        #    dataset, alg, alg_params, results_dir=output_settings['output_dir'],
-        #    eval_type=eval_type, **kwargs,)
-        eval_type = cv.get_output_prefix(folds, "1-%s"%kwargs['num_reps'], neg_factor, cv_seed)
-        combos = [dict(zip(alg_params.keys(), val)) for val in itertools.product(
-                *(alg_params[param] for param in alg_params))]
-        params_str = "param-combos%d" % (len(combos))
-        if len(combos) == 1:
-            params_str = runner.get_runner_params_str(alg, combos[0], dataset=dataset)
-        out_dir = "%s/%s/%s" % (
-            results_dir, dataset['net_version'], dataset['exp_name'])
-        rep_file = "%s/%s/%s%s%s%s.txt" % (
-            out_dir, alg, eval_type, params_str, kwargs.get('postfix', ''), kwargs.get('prec_rec_str'))
-        if os.path.isfile(rep_file) and not kwargs.get('forceread'):
-            print("reading processed repetition files from %s. Use --forceread to start from scratch and overwrite" % (rep_file))
-            reps_df = pd.read_csv(rep_file, sep='\t')
-            return reps_df
-    reps_df = pd.DataFrame()
-    for rep in range(1,kwargs.get('num_reps',1)+1):
-        curr_seed = None
-        if cv_seed is not None:
-            curr_seed = cv_seed + rep-1
-        eval_type = cv.get_output_prefix(folds, rep, neg_factor, curr_seed)
-        df = load_alg_results(
-            dataset, alg, alg_params, 
-            results_dir=results_dir, eval_type=eval_type, **kwargs)
-        add_dataset_settings(dataset, df) 
-        df['rep'] = rep
-        reps_df = pd.concat([reps_df, df])
-    if kwargs.get('num_reps',1) > 1 and len(reps_df) > 0:
-        print("Writing %s" % (rep_file)) 
-        reps_df.to_csv(rep_file, sep='\t')
-    return reps_df
+#    if kwargs.get('num_reps',1) > 1:
+#        #rep_file = get_rep_file(
+#        #    dataset, alg, alg_params, results_dir=output_settings['output_dir'],
+#        #    eval_type=eval_type, **kwargs,)
+#        eval_type = cv.get_output_prefix(folds, "1-%s"%kwargs['num_reps'],  **kwargs)
+#        combos = [dict(zip(alg_params.keys(), val)) for val in itertools.product(
+#                *(alg_params[param] for param in alg_params))]
+#        params_str = "param-combos%d" % (len(combos))
+#        if len(combos) == 1:
+#            params_str = runner.get_runner_params_str(alg, combos[0], dataset=dataset)
+#        out_dir = "%s/%s/%s" % (
+#            results_dir, dataset['net_version'], dataset['exp_name'])
+#        rep_file = "%s/%s/%s%s%s%s.txt" % (
+#            out_dir, alg, eval_type, params_str, kwargs.get('postfix', ''), kwargs.get('prec_rec_str'))
+#        if os.path.isfile(rep_file) and not kwargs.get('forceread'):
+#            print("reading processed repetition files from %s. Use --forceread to start from scratch and overwrite" % (rep_file))
+#            reps_df = pd.read_csv(rep_file, sep='\t')
+#            return reps_df
+    #reps_df = pd.DataFrame()
+    #for rep in range(1,kwargs.get('num_reps',1)+1):
+    #curr_seed = None
+    #if cv_seed is not None:
+    #    curr_seed = cv_seed + rep-1
+    eval_type = cv.get_output_prefix(folds, kwargs.get('num_reps',1), **kwargs)
+    df = load_alg_results(
+        dataset, alg, alg_params, 
+        results_dir=results_dir, eval_type=eval_type, **kwargs)
+    add_dataset_settings(dataset, df) 
+        #df['rep'] = rep
+        #reps_df = pd.concat([reps_df, df])
+#    if kwargs.get('num_reps',1) > 1 and len(reps_df) > 0:
+#        print("Writing %s" % (rep_file)) 
+#        reps_df.to_csv(rep_file, sep='\t')
+    return df
 
 
 def add_dataset_settings(dataset, df):
