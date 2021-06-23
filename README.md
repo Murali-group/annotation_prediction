@@ -21,7 +21,7 @@ R -e "install.packages('https://cran.r-project.org/src/contrib/PRROC_1.3.1.tar.g
 ```
 
 > If you are unable to install the the R package for computing the AUPRC and AUROC, 
-> the code will use sklearn, which is not as accurate in some cases.
+> the code will use sklearn instead, which is not as accurate in some cases.
 
 ## Usage 
 ### Generate predictions
