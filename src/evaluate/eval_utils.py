@@ -1,12 +1,17 @@
 import os
 import numpy as np
-from collections import defaultdict
 from scipy import sparse
 import fcntl
 # needed for evaluation metrics
-from rpy2.robjects.packages import importr
-from rpy2.robjects import FloatVector
-prroc = importr('PRROC')
+try:
+    from rpy2.robjects.packages import importr
+    from rpy2.robjects import FloatVector
+    prroc = importr('PRROC')
+    use_sklearn = False
+except:
+    print("WARNING: unable to import R for AUPRC package. Using sklearn to compute AUPRC and AUROC")
+    from sklearn import metrics
+    use_sklearn = True
 
 
 def evaluate_ground_truth(
@@ -75,11 +80,13 @@ def evaluate_ground_truth(
             auprc = 0
             auroc = 0
         else:
-            #auprc = compute_auprc(prec, recall)
-            #auroc = compute_auroc([r for r, f in fpr], [f for r, f in fpr])
-            # get the scores of the positive nodes and the scores of the negative nodes
-            # and compute the auprc using the R package
-            auprc, auroc = compute_auprc_auroc(scores[positives], scores[negatives])
+            if use_sklearn:
+                auprc = compute_auprc(prec, recall)
+                auroc = compute_auroc([r for r, f in fpr], [f for r, f in fpr])
+            else:
+                # get the scores of the positive nodes and the scores of the negative nodes
+                # and compute the auprc using the R package, which is more accurate than sklearn
+                auprc, auroc = compute_auprc_auroc(scores[positives], scores[negatives])
         eprec_vals = []
         if early_prec is not None:
             # compute the early precision at specified values
@@ -262,14 +269,14 @@ def compute_auprc_auroc(pos_scores, neg_scores):
     return float(np.asarray(auprc)[0]), float(np.asarray(auroc)[0])
 
 
-#def compute_auprc(prec, rec):
-#    auprc = metrics.auc(rec, prec)
-#    return auprc
-#
-#
-#def compute_auroc(tpr, fpr):
-#    auroc = metrics.auc(fpr, tpr)
-#    return auroc
+def compute_auprc(prec, rec):
+    auprc = metrics.auc(rec, prec)
+    return auprc
+
+
+def compute_auroc(tpr, fpr):
+    auroc = metrics.auc(fpr, tpr)
+    return auroc
 
 
 def compute_early_prec(prec, rec, recall_vals=[0.1], pred_ranks=None, num_pos=None):
