@@ -35,7 +35,7 @@ class Sparse_Networks:
     *weight_method*: method to combine the networks if multiple sparse networks are given.
         Possible values: 'swsn', 'gmw', or 'add'
         'swsn': Simultaneous Weighting with Specific Negatives (all terms)
-        'gmw': GeneMANIA Weighting (term-by-term). May also called gm2008
+        'gmw': GeneMANIA Weighting (term-by-term). May also be called gm2008
         'add': Simply add the networks together
     *unweighted*: set the edge weights to 1 for all given networks.
     *term_weights*: a dictionary of tuples containing the weights and indices to use for each term.
@@ -213,10 +213,10 @@ class Sparse_Annotations:
         self.ann_matrix = self.ann_matrix.dot(diag)
 
 
-def get_net_out_str(net_files, string_net_files=None, string_nets=None):
+def get_net_out_str(net_files=None, string_net_files=None, string_nets=None):
     #num_networks = len(net_files) + len(string_nets)
     net_files_str = '-'.join(os.path.basename(f).split('.')[0] for f in net_files)+'-' \
-                    if len(net_files) > 0 else ""
+                    if net_files is not None and len(net_files) > 0 else ""
     # if there is only 1 string network, then write the name instead of the number
     string_nets_str = "" 
     if string_net_files is not None and len(string_net_files) > 0 and \
@@ -232,7 +232,18 @@ def get_net_out_str(net_files, string_net_files=None, string_nets=None):
 
 def create_sparse_net_file(
         out_pref, net_files=[], string_net_files=[], 
-        string_nets=STRING_NETWORKS, string_cutoff=None, forcenet=False):
+        string_nets=STRING_NETWORKS, string_cutoff=None,
+        add_net_out_str=False, forcenet=False):
+    """
+    Wrapper around setup_sparse_networks function that reads/writes to file
+    *net_files*: list of paths to regular edge-list network file
+    *string_net_files*: List of string files containing all 14 STRING network columns
+    *string_nets*: List of STRING network column names for which to make a sparse matrix.
+    *string_cutoff*: Cutoff to use for the STRING combined network column (last)
+
+    *returns*: List of sparse networks, list of network names,
+        list of proteins in the order they're in in the sparse networks
+    """
     if net_files is None:
         net_files = []
     # if there aren't any string net files, then set the string nets to empty
@@ -242,10 +253,10 @@ def create_sparse_net_file(
     elif string_nets is None:
         string_nets = STRING_NETWORKS
     string_nets = list(string_nets)
-    net_str = get_net_out_str(net_files, string_net_files, string_nets)
-    out_pref += net_str
-    sparse_nets_file = "%ssparse-nets.mat" % (
-        out_pref)
+    if add_net_out_str:
+        net_str = get_net_out_str(net_files, string_net_files, string_nets)
+        out_pref += net_str
+    sparse_nets_file = "%ssparse-nets.mat" % (out_pref)
     # the node IDs should be the same for each of the networks,
     # so no need to include the # in the ids file
     node_ids_file = "%snode-ids.txt" % (out_pref)

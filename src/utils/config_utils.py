@@ -7,6 +7,16 @@ import os
 from ..algorithms import runner
 from ..plot import plot_utils
 import itertools
+import pandas as pd
+import numpy as np
+import yaml
+
+
+def load_config_file(config_file):
+    with open(config_file, 'r') as conf:
+        #config_map = yaml.load(conf, Loader=yaml.FullLoader)
+        config_map = yaml.load(conf)
+    return config_map
 
 
 def setup_config_variables(config_map, **kwargs):
@@ -114,8 +124,42 @@ def get_alg_results_files(
         results_file = "%s%s%s.txt" % (file_type, params_str, postfix)
         if use_alg_plot_name is True:
             alg_name = plot_utils.ALG_NAMES.get(alg,alg)
-        alg_name += eval_str
+            alg_name += eval_str
+        else:
+            alg_name = alg
         if len(combos) > 1: 
             alg_name = alg_name + params_str
         alg_results_files[alg_name] = results_file
     return alg_results_files
+
+
+def get_pvals_apply_cutoff(df, pred_file, apply_cutoff=True, **kwargs):
+    df.set_index('prot', inplace=True)
+    stat_sig_params_str = "%srand-%s%s" % (
+        kwargs.get('num_random_sets',1000), kwargs.get('num_bins',10),
+        kwargs.get('bin_method','kmeans'))
+    pval_file = pred_file.replace("networks/", "viz/networks/") \
+        .replace(".txt", "-%s-pvals.tsv" % (stat_sig_params_str))
+    if not os.path.isfile(pval_file):
+        print("WARNING: %s does not exist. Leaving pval column empty" % (pval_file))
+        df['pval'] = np.nan
+        return df
+    print("reading pvals from %s" % (pval_file))
+    pval_df = pd.read_csv(pval_file, sep='\t', index_col=0)
+    df['pval'] = pval_df['pval']
+    topk = list(df.iloc[:300].index)
+    df2 = df[df['pval'] < kwargs['stat_sig_cutoff']]
+    topk2 = list(df2.iloc[:300].index)
+
+    print("\t%d nodes with pval < %s among top 300" % (len(set(topk) & set(topk2)), kwargs['stat_sig_cutoff']))
+    df2.reset_index(inplace=True, col_fill='prot')
+    df2.reset_index(inplace=True, drop=True)
+    #df = df[['prot', 'score']]
+    df2.sort_values(by='score', ascending=False, inplace=True)
+    if apply_cutoff:
+        print(df2.head())
+        return df2
+    else:
+        return df
+
+
