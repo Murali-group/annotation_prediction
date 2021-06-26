@@ -1,10 +1,10 @@
 
 import time
-from tqdm import tqdm, trange
+#from tqdm import tqdm, trange
 from scipy import sparse as sp
 from scipy.sparse.linalg import spilu, LinearOperator
 import numpy as np
-from . import genemania
+from . import rl_genemania as genemania
 
 
 def setupInputs(run_obj):
@@ -75,7 +75,7 @@ def run(run_obj):
     Milu = None
 
     # run GeneMANIA on each term individually
-    for term in tqdm(run_obj.terms_to_run):
+    for term in run_obj.terms_to_run:
         idx = run_obj.ann_obj.term2idx[term]
         # get the row corresponding to the current terms annotations 
         y = run_obj.ann_matrix[idx,:].toarray()[0]
@@ -86,7 +86,7 @@ def run(run_obj):
             W,_,_ = run_obj.net_obj.weight_GMW(y, term)
             L = genemania.setup_laplacian(W)
             params_results['%s_weight_time'%(alg)] += time.process_time() - start_time
-        if alg in ['genemaniaplus']:
+        if alg in ['genemaniaplus', 'rl']:
             # remove the negative examples
             y = (y > 0).astype(int)
 
@@ -97,7 +97,7 @@ def run(run_obj):
             tol=float(run_obj.params['tol']),
             Milu=Milu, verbose=run_obj.kwargs.get('verbose', False))
         if run_obj.kwargs.get('verbose', False) is True:
-            tqdm.write("\t%s converged after %d iterations " % (alg, iters) +
+            print("\t%s converged after %d iterations " % (alg, iters) +
                     "(%0.3f sec, %0.3f wall_time) for %s" % (process_time, wall_time, term))
 
         ## if they're different dimensions, then set the others to zeros 
@@ -106,7 +106,7 @@ def run(run_obj):
         # limit the scores to the target nodes
         if len(run_obj.target_prots) != len(scores):
             mask = np.ones(len(scores), np.bool)
-            mask[run_obj.target_prots] = 0
+            mask[run_obj.target_prots] = False
             # everything that's not a target prot will be set to 0
             scores[mask] = 0
         # 0s are not explicitly stored in lil matrix

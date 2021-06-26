@@ -26,7 +26,13 @@ full_column_names["combined_score"]          = 16
 # the three different sets of STRING networks considered
 # everything except for the 'combined_score'
 STRING_NETWORKS = list(full_column_names.keys())[2:-1]
+# all networks using data from this species only
 NON_TRANSFERRED_STRING_NETWORKS = [net for net in STRING_NETWORKS if 'transferred' not in net]
+# The set of "CORE" networks originally came from those used in Mashup and DeepNF.
+# In the Mashup paper, they said they excluded textmining:
+# "We excluded the network constructed from text mining of academic literature to prevent confounding
+# caused by links based on functional similarity".
+# But the way I thought about it was that the core would be based on experimental and genomic data in the species only.
 CORE_STRING_NETWORKS = ["neighborhood", "fusion", "cooccurence", "coexpression", "experiments", "database"]
 
 # mapping of string naming scheme to networks
@@ -45,7 +51,8 @@ def convert_string_naming_scheme(string_nets_str):
     """
     # TODO I could use an ordered set/dict
     string_nets = []
-    for name in string_nets_str.split(','):
+    split_str = string_nets_str.split(',') if not isinstance(string_nets_str, list) else string_nets_str
+    for name in split_str:
         if name in STRING_NAME_MAPPING:
             for n in STRING_NAME_MAPPING[name]:
                 if n not in string_nets:

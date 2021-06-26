@@ -132,7 +132,7 @@ def plot(df_cutoffs, out_pref, alpha=0.95):
     # out_file = "%s/%s-%s-loso-pos-neg-ktau-cutoffs-boxplots.png" % (out_dir, version, h)
     out_file = "%s-ktau-cutoffs-boxplots.pdf" % (out_pref)
     print("Writing figure to %s" % (out_file))
-    plt.savefig(out_file)
+    plt.savefig(out_file, bbox_inches='tight')
     #plt.show()
     plt.close()
 

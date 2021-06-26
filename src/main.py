@@ -14,9 +14,11 @@ from scipy import sparse as sp
 from . import setup_sparse_networks as setup
 from .algorithms import alg_utils as alg_utils
 from .algorithms import runner as runner
+# TODO importing R in these scripts is messing up other scripts once in a while
 from .evaluate import eval_utils as eval_utils
 from .evaluate import cross_validation as cross_validation
 from .evaluate import eval_leave_one_species_out as eval_loso
+from .evaluate import stat_sig_node
 from .utils import file_utils as utils
 from .utils import net_utils
 from .utils import string_utils as string_utils
@@ -32,8 +34,9 @@ def parse_args():
         config_map = yaml.load(conf)
     # TODO check to make sure the inputs are correct in config_map
 
-    # for each argument not set in opts, remove it from kwargs.
-    # That way the default will be used instead of None
+    # For each argument not set in opts, remove it from kwargs.
+    # This will allow options that are set in the config file to be overridden by
+    # options set in command line arguments
     for key in list(kwargs.keys()):
         if kwargs[key] is None:
             del kwargs[key]
@@ -43,7 +46,7 @@ def parse_args():
 
 def setup_opts():
     ## Parse command line args.
-    parser = argparse.ArgumentParser()  #description='')
+    parser = argparse.ArgumentParser()
 
     # general parameters
     group = parser.add_argument_group('Main Options')
@@ -77,6 +80,11 @@ def setup_opts():
     group.add_argument('--early-prec', '-E', type=str, action="append", default=["k1", "0.1"],
             help="Report the precision at the specified recall value (between 0 and 1). " + \
             "If prefixed with 'k', for a given term, the precision at (k * # ann) # of nodes is given. Default: k1, 0.1")
+    group.add_argument('--eval-stat-sig-nodes', type=int,
+            help="Evaluate the node statistical significance by repeating predictions with multiple subsets. " +
+            "Specify the # repetitions.")
+    group.add_argument('--num-bins', type=int, default=10,
+            help="Number of bins into which the nodes will be split (using k-means of the degree distribution. Default=10")
 
     # additional parameters
     group = parser.add_argument_group('Additional options')
@@ -106,11 +114,15 @@ def run(config_map, **kwargs):
     print("Running with these kwargs: " + str(kwargs))
 
     for dataset in input_settings['datasets']:
+        kwargs['dataset_name'] = config_utils.get_dataset_name(dataset)
         # add options specified for this dataset to kwargs  
-        # youngs_neg: for a term t, a gene g cannot be a negative for t if g shares an annotation with any gene annotated to t 
-        #kwargs['youngs_neg'] = dataset.get('youngs_neg') 
+        if dataset.get('stat_sig_drug_nodes') is not None:
+            kwargs['stat_sig_drug_nodes'] = "%s/%s/%s" % (
+                input_dir, dataset['net_version'], dataset['stat_sig_drug_nodes'])
+            kwargs['curr_dataset'] = dataset
+            kwargs['curr_input_dir'] = input_dir
 
-        net_obj, ann_obj, eval_ann_obj = setup_dataset(dataset, input_dir, alg_settings, **kwargs) 
+        net_obj, ann_obj, eval_ann_obj = setup_dataset(dataset, input_dir, **kwargs) 
         # if there are no annotations, then skip this dataset
         if len(ann_obj.terms) == 0:
             print("No terms found. Skipping this dataset")
@@ -162,6 +174,11 @@ def run(config_map, **kwargs):
             # now run the leave-one-species-out eval
             eval_loso.eval_loso(alg_runners, ann_obj, eval_ann_obj=eval_ann_obj, **kwargs)
 
+        if kwargs.get('eval_stat_sig_nodes'):
+            stat_sig_node.eval_stat_sig_nodes_runners(
+                alg_runners, net_obj, ann_obj, num_random_sets=kwargs['eval_stat_sig_nodes'], k=None, **kwargs) 
+    print("Finished")
+
 
 def setup_net(input_dir, dataset, **kwargs):
     # load the network matrix and protein IDs
@@ -181,6 +198,7 @@ def setup_net(input_dir, dataset, **kwargs):
         dataset['multi_net'] = True
     else:
         dataset['multi_net'] = False
+    out_pref = net_dir
 
     # parse and store the networks 
     if dataset.get('multi_net') is True or 'string_net_files' in dataset: 
@@ -198,6 +216,7 @@ def setup_net(input_dir, dataset, **kwargs):
                 # this function also creates the multi net file if it doesn't exist
                 string_cutoff = dataset['net_settings'].get('string_cutoff', 150) 
             out_pref = "%s/sparse-nets/%s" % (net_dir, "c%d-"%string_cutoff if string_net_files else "")
+            out_pref += setup.get_net_out_str(net_files, string_net_files, string_nets)
             utils.checkDir(os.path.dirname(out_pref))
             sparse_nets, net_names, prots = setup.create_sparse_net_file(
                     out_pref, net_files=net_files, string_net_files=string_net_files, 
@@ -226,6 +245,8 @@ def setup_net(input_dir, dataset, **kwargs):
         W, prots = alg_utils.setup_sparse_network(net_files[0], forced=kwargs.get('forcenet',False))
         net_obj = setup.Sparse_Networks(
             W, prots, unweighted=unweighted, verbose=kwargs.get('verbose',False))
+    # store the output prefix of the network to use later
+    net_obj.out_pref = out_pref
     return net_obj
 
 
@@ -277,11 +298,16 @@ def load_annotations(prots, dataset, input_dir, **kwargs):
     return selected_terms, ann_obj, eval_ann_obj
 
 
-def setup_dataset(dataset, input_dir, alg_settings, **kwargs):
+def setup_dataset(dataset, input_dir, **kwargs):
     if kwargs.get('verbose'):
         utils.print_memory_usage()
     # setup the network matrix first
     net_obj = setup_net(input_dir, dataset, **kwargs)
+    # also read the network to use for computing the statistical significance
+    if 'stat_sig_net_settings' in dataset:
+        dataset['net_settings']['string_nets'] = dataset['stat_sig_net_settings']['string_nets']
+        net_obj2 = setup_net(input_dir, dataset, **kwargs)
+        net_obj.W = net_obj2.W
     if kwargs.get('verbose'):
         utils.print_memory_usage()
     #ann_obj = setup_annotations(input_dir, dataset, **kwargs)
@@ -346,7 +372,7 @@ def run_algs(alg_runners, **kwargs):
     # now setup the inputs for the runners
     for run_obj in runners_to_run:
         # TODO make a better way of indicating an alg needs negative examples than just having 'plus' in the name
-        if 'plus' not in run_obj.name and neg_factor is not None:
+        if 'plus' not in run_obj.name and run_obj.name not in ['lazy_rw', 'rwr'] and neg_factor is not None:
             orig_ann_obj = run_obj.ann_obj
             # sample negative examples, repeat the method the given number of times,
             # and then average the resulting scores
@@ -388,5 +414,5 @@ def run_algs(alg_runners, **kwargs):
                          run_obj.out_file, num_pred_to_write=num_pred_to_write)
 
     #eval_loso.write_stats_file(runners_to_run, params_results)
-    print(params_results)
-    print("Finished")
+    #print(params_results)
+    return runners_to_run

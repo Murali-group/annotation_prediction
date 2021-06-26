@@ -1,27 +1,31 @@
 import os
 import numpy as np
-from collections import defaultdict
 from scipy import sparse
 import fcntl
 # needed for evaluation metrics
 try:
+    from rpy2.robjects.packages import importr
+    from rpy2.robjects import FloatVector
+    prroc = importr('PRROC')
+    use_sklearn = False
+except:
+    print("WARNING: unable to import R for AUPRC package. Using sklearn to compute AUPRC and AUROC")
     from sklearn import metrics
-except ImportError:
-    print("WARNING: Unable to import sklearn")
-    pass
+    use_sklearn = True
 
 
 def evaluate_ground_truth(
         run_obj, eval_ann_obj, out_file,
         non_pos_as_neg_eval=False, taxon='-',
         early_prec=None, rep=None, write_prec_rec=False, 
-        append=False, **kwargs):
+        append=False, node_folds=None, **kwargs):
     """
     *early_prec*: A list of recall values for which to get the precision. 
         Each will get its own column in the output file
     *write_prec_rec*: For every term, write a file containing the 
         precision and recall at every positive and negative example
     *rep*: index of current repetition if repeating CV multiple times.
+    *node_folds*: dictionary of the fold each pos/neg node belongs to
     """
     term_scores, terms = run_obj.term_scores, run_obj.terms_to_run 
     eval_ann_matrix, prots = eval_ann_obj.ann_matrix, eval_ann_obj.prots
@@ -38,13 +42,14 @@ def evaluate_ground_truth(
     term_prec_rec = {}
 
     for term in terms_to_eval:
+        score_idx = score_term2idx[term]
         eval_idx = eval_ann_obj.term2idx[term]
         # get the row corresponding to the current terms annotations 
         term_ann = eval_ann_matrix[eval_idx,:].toarray().flatten()
         positives = np.where(term_ann > 0)[0]
         # to get the scores, map the current term index to the
         # index of the term in the scores matrix
-        scores = term_scores[score_term2idx[term]]
+        scores = term_scores[score_idx]
         # this is only needed for aptrank since it does not return a sparse matrix
         if sparse.issparse(scores):
             scores = scores.toarray().flatten()
@@ -75,61 +80,67 @@ def evaluate_ground_truth(
             auprc = 0
             auroc = 0
         else:
-            auprc = compute_auprc(prec, recall)
-            auroc = compute_auroc([r for r, f in fpr], [f for r, f in fpr])
+            if use_sklearn:
+                auprc = compute_auprc(prec, recall)
+                auroc = compute_auroc([r for r, f in fpr], [f for r, f in fpr])
+            else:
+                # get the scores of the positive nodes and the scores of the negative nodes
+                # and compute the auprc using the R package, which is more accurate than sklearn
+                auprc, auroc = compute_auprc_auroc(scores[positives], scores[negatives])
         eprec_vals = []
         if early_prec is not None:
             # compute the early precision at specified values
+            pred_ranks = [rank for _,_,rank,_,_ in pos_neg_stats] 
             eprec_vals = compute_early_prec(
-                prec, recall, pos_neg_stats, early_prec, term_num_pos[term])
+                prec, recall, recall_vals=early_prec, pred_ranks=pred_ranks, num_pos=term_num_pos[term])
         term_stats[term] = (fmax, avgp, auprc, auroc, eprec_vals)
         if kwargs['verbose']:
             print("%s fmax: %0.4f" % (term, fmax))
 
-    # skip writing the output file if there's only one term specified
     rep_str = "\t%s"%rep if rep is not None else ""
-    if write_prec_rec and len(term_prec_rec) == 1:
-        print("skipping writing %s" % (out_file))
-    else:
-        out_str = ""
-        # sort by # ann per term
-        for g in sorted(term_stats, key=term_num_pos.get, reverse=True):
-            fmax, avgp, auprc, auroc, eprec_vals = term_stats[g]
-            # format the values so they'll be ready to be written to the output file
-            early_prec_str = '\t'+'\t'.join("%0.4f" % (p) for p in eprec_vals) \
-                             if len(eprec_vals) > 0 else ""
-            out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s%s\n" % (
-                "%s\t"%taxon if taxon not in ["-", None] else "",
-                g, fmax, avgp, auprc, auroc, term_num_pos[g], early_prec_str, rep_str)
-        # don't re-write the header if this file is being appended to
-        if not os.path.isfile(out_file) or not append:
-            print("Writing results to %s\n" % (out_file))
-            header_line = "#term\tfmax\tavgp\tauprc\tauroc"
-            if taxon not in ['-', None]:
-                header_line = "#taxon\t%s\t# test ann" % (header_line)
-            else:
-                header_line += "\t# ann"
-            if early_prec is not None:
-                header_line += '\t'+'\t'.join(["eprec-rec%s" % (r) for r in early_prec])
-            if rep is not None:
-                header_line += '\trepetition'
-            out_str = header_line+"\n" + out_str
+    ## skip writing the output file if there's only one term specified
+    #if write_prec_rec and len(term_prec_rec) == 1:
+    #    print("skipping writing %s" % (out_file))
+    #else:
+    out_str = ""
+    # sort by # ann per term
+    for g in sorted(term_stats, key=term_num_pos.get, reverse=True):
+        fmax, avgp, auprc, auroc, eprec_vals = term_stats[g]
+        # format the values so they'll be ready to be written to the output file
+        early_prec_str = '\t'+'\t'.join("%0.4f" % (p) for p in eprec_vals) \
+                            if len(eprec_vals) > 0 else ""
+        out_str += "%s%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%d%s%s\n" % (
+            "%s\t"%taxon if taxon not in ["-", None] else "",
+            g, fmax, avgp, auprc, auroc, term_num_pos[g], early_prec_str, rep_str)
+    # don't re-write the header if this file is being appended to
+    if not os.path.isfile(out_file) or not append:
+        print("Writing results to %s\n" % (out_file))
+        header_line = "#term\tfmax\tavgp\tauprc\tauroc"
+        if taxon not in ['-', None]:
+            header_line = "#taxon\t%s\t# test ann" % (header_line)
         else:
-            print("Appending results to %s\n" % (out_file))
-        with open(out_file, 'a' if append else 'w') as out:
-            # lock it to avoid scripts trying to write at the same time
-            fcntl.flock(out, fcntl.LOCK_EX)
-            out.write(out_str)
-            fcntl.flock(out, fcntl.LOCK_UN)
+            header_line += "\t# ann"
+        if early_prec is not None:
+            header_line += '\t'+'\t'.join(["eprec-rec%s" % (r) for r in early_prec])
+        if rep is not None:
+            header_line += '\trepetition'
+        out_str = header_line+"\n" + out_str
+    else:
+        print("Appending results to %s\n" % (out_file))
+    with open(out_file, 'a' if append else 'w') as out:
+        # lock it to avoid scripts trying to write at the same time
+        fcntl.flock(out, fcntl.LOCK_EX)
+        out.write(out_str)
+        fcntl.flock(out, fcntl.LOCK_UN)
 
     if write_prec_rec:
         term = list(term_prec_rec.keys())[0]
-        out_file_pr = out_file.replace('.txt', "prec-rec%s%s.txt" % (
-            taxon if taxon not in ['-', None] else '',
-            '-%s'%(term) if len(term_prec_rec) == 1 else ""))
-        if not os.path.isfile(out_file) or not append:
+        out_file_pr = out_file.replace('.txt', "prec-rec%s.txt" % (
+            taxon if taxon not in ['-', None] else ''))
+            #'-%s'%(term) if len(term_prec_rec) == 1 else ""))
+        if not os.path.isfile(out_file_pr) or not append:
             print("writing prec/rec to %s" % (out_file_pr))
-            header_line = "#term\tprec\trec\tnode\tscore\tidx\tpos/neg"
+            header_line = "#term\tprec\trec\tnode\tscore\tidx\tpos/neg\tfold"
             header_line += "\trepetition" if rep is not None else ""
             header_line += "\n"
         else:
@@ -139,8 +150,10 @@ def evaluate_ground_truth(
             out.write(header_line)
             #for term, (prec, rec, pos_neg_stats) in sorted(term_prec_rec.items(), key=term_num_pos.get, reverse=True):
             for term, (prec, rec, pos_neg_stats) in term_prec_rec.items():
-                out.write(''.join(["%s\t%0.4f\t%0.4f\t%s\t%0.4e\t%d\t%d%s\n" % (
-                    term, p, r, prots[n], s, idx, pos_neg, rep_str) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
+                out.write(''.join(["%s\t%0.4f\t%0.4f\t%s\t%0.4e\t%d\t%d%s%s\n" % (
+                    term, p, r, prots[n], s, idx, pos_neg,
+                    "\t"+str(node_folds[n]) if node_folds is not None else "",
+                    rep_str) for p,r,(n,s,idx,pos_neg,_) in zip(prec, rec, pos_neg_stats)]))
 
 
 def compute_eval_measures(scores, positives, negatives=None, 
@@ -244,6 +257,18 @@ def compute_avgp(prec, rec):
     return avgp
 
 
+def compute_auprc_auroc(pos_scores, neg_scores):
+    prCurve = prroc.pr_curve(
+        scores_class0=FloatVector(pos_scores),
+        scores_class1=FloatVector(neg_scores))
+    auprc = prCurve[1]
+    rocCurve = prroc.roc_curve(
+        scores_class0=FloatVector(pos_scores),
+        scores_class1=FloatVector(neg_scores))
+    auroc = rocCurve[1]
+    return float(np.asarray(auprc)[0]), float(np.asarray(auroc)[0])
+
+
 def compute_auprc(prec, rec):
     auprc = metrics.auc(rec, prec)
     return auprc
@@ -254,7 +279,23 @@ def compute_auroc(tpr, fpr):
     return auroc
 
 
-def compute_early_prec(prec, rec, pos_neg_stats, recall_vals, num_pos):
+def compute_early_prec(prec, rec, recall_vals=[0.1], pred_ranks=None, num_pos=None):
+    """
+    Compute the precision at specific values of recall
+    *prec*: list of precision values
+    *rec*: list of recall values
+    *recall_vals*: list of recall points for which to compute precision.  
+        If 'k' is with the value (e.g., "k2"), then find the precision after k*num_pos predictions have been made
+
+    The following two options are only used if 'k' recall vals are passed in:
+    *pred_ranks*: list that gives the prediction rank of the values in *prec* and *rec*, 
+        which would be used to find the specific point where k*num_pos predictions lie on the prec/rec curve
+        For example, suppose num_pos=10, num_neg=30, and num_nodes=100. *prec*, *rec*, and *pred_ranks* would each have 40 values, 
+        and *pred_ranks* would contain the rank of the pos and neg nodes among the 100 nodes.
+    *num_pos*: original number of positive examples for this term
+
+    *returns*: A list of precision values at the specified *recall_vals*
+    """
     early_prec_values = []
     for curr_recall in recall_vals:
         # if a k recall is specified, get the precision at the recall which is k * # ann in the left-out species
@@ -262,9 +303,9 @@ def compute_early_prec(prec, rec, pos_neg_stats, recall_vals, num_pos):
             k_val = float(curr_recall.replace('k',''))
             num_nodes_to_get = k_val * num_pos 
             # the pos_neg_stats tracks the prec for every node.
-            # So find the precision value for first node with an index >= (k * # ann)
-            for idx, (_, _, _, _, curr_num_pos) in enumerate(pos_neg_stats): 
-                if curr_num_pos >= num_nodes_to_get:
+            # So find the precision value for first node with a rank >= (k * # ann)
+            for idx, rank in enumerate(pred_ranks): 
+                if rank >= num_nodes_to_get:
                     break
             # get the precision at the corresponding index
             p = prec[idx]
@@ -302,7 +343,9 @@ def sample_neg_examples(ann_obj, sample_neg_examples_factor=10):
 
 def sample_term_neg_examples(pos_examples, prot_universe, sample_neg_examples_factor):
     """
-    *pos_examples*: indices of prots
+    *pos_examples*: set of positive examples
+    *prot_universe*: set of universe of nodes to sample from (e.g., nodes in the network
+    *sample_neg_examples_factor*: this determines the ratio of positive:negative nodes
     """
     neg_factor = sample_neg_examples_factor * len(pos_examples) 
     non_pos_universe = prot_universe - pos_examples
